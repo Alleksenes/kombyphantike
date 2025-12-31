@@ -1,0 +1,32 @@
+# Python internals
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Heavy / Copyrighted Data (User must download)
+data/dictionaries/
+data/raw/
+data/sessions/
+
+# Large binaries
+*.whl
+
+data/processed/
+data/kombyphantike_worksheet.csv
+data/ai_instruction.txt
+
+# Editor settings
+.vscode/
+.idea/
+
+# Poetry
+poetry.lock
+
+# Keys
+kombyphantike-google-key.json
+.env
