@@ -1,5 +1,4 @@
-import json
-import unicodedata
+import json, unicodedata
 import pandas as pd
 from pathlib import Path
 from src.config import DICT_DIR
@@ -64,11 +63,9 @@ class BetaCodeConverter:
         decomp = unicodedata.normalize("NFD", text)
         filtered = []
         for char in decomp:
-            # Keep Letters (L) AND Numbers (N) if needed?
             # Beta code uses letters.
             if unicodedata.category(char).startswith("L"):
                 filtered.append(char)
 
         base_text = "".join(filtered).lower()
-        # No need to map sigma if we are using Latin characters
         return base_text

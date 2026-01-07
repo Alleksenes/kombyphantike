@@ -1,8 +1,5 @@
-import re
 import pandas as pd
-import logging
-import unicodedata
-import difflib
+import logging, re, unicodedata, difflib
 from typing import Dict, Any
 from src.lemmatizer import AncientLemmatizer
 
@@ -70,9 +67,6 @@ class Enricher:
         # 2. NEW: -ώνω RESTORATION (e.g. μετανιώνω -> μετανοέω)
         if lemma.endswith("ώνω"):
             stem = lemma[:-3]  # Remove 'ώνω'
-            # μετανι -> μεταν
-            # Need to handle the 'i' glide often present? (metan-i-ono)
-            # Try stripping 'ι' if present
             if stem.endswith("ι"):
                 stem_no_i = stem[:-1]
                 candidates.append(stem_no_i + "οέω")  # metan-oeo
@@ -142,13 +136,11 @@ class Enricher:
         if self.check_oracle(lemma):
             return lemma
 
-        # Try Lemmatized Lemma
         lemma_of_lemma = self.lemmatizer.lemmatize(self.sanitize_greek(lemma))
         if self.check_oracle(lemma_of_lemma):
             return lemma_of_lemma
 
         # --- PHASE 3: MUTATION ENGINE (The Workaround) ---
-        # If text failed, and direct lookup failed, try to reconstruct it.
         mutated = self.mutation_engine(lemma)
         if mutated:
             return mutated

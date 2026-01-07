@@ -1,6 +1,5 @@
 import pandas as pd
-import json
-import logging
+import json, logging
 from typing import Dict, Generator, Any
 from src.config import KELLY_FILE, KAIKKI_FILE, COL_LEMMA
 
@@ -15,17 +14,13 @@ class DataIngestor:
     def load_kelly_list(self) -> pd.DataFrame:
         logger.info(f"Loading Kelly List from {KELLY_FILE}...")
         try:
-            # Check extension
             if str(KELLY_FILE).endswith(".xlsx"):
                 self.kelly_df = pd.read_excel(KELLY_FILE, dtype=str)
             else:
                 self.kelly_df = pd.read_csv(KELLY_FILE, dtype=str)
-
-            # Clean column names
             self.kelly_df.columns = [c.strip() for c in self.kelly_df.columns]
 
             # DYNAMIC MAPPING
-            # Find the column that contains "Lemma" or "Λήμμα"
             lemma_col = next(
                 (c for c in self.kelly_df.columns if "Lemma" in c or "Λήμμα" in c), None
             )
@@ -35,7 +30,6 @@ class DataIngestor:
                     f"Could not find Lemma column. Columns: {self.kelly_df.columns}"
                 )
 
-            # Rename to standard "Lemma"
             self.kelly_df = self.kelly_df.rename(columns={lemma_col: COL_LEMMA})
 
             # Find CEFR
@@ -59,7 +53,6 @@ class DataIngestor:
             logger.error(f"Failed to load Kelly List: {e}")
             raise
 
-    # ... (Rest of class remains same) ...
     def stream_kaikki_dictionary(self) -> Generator[Dict[str, Any], None, None]:
         logger.info(f"Streaming Dictionary from {KAIKKI_FILE}...")
         try:

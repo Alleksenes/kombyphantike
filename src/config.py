@@ -27,4 +27,4 @@ DRILLS_FILE = PROCESSED_DIR / "modern_drills.csv"
 KNOTS_PATH = DICT_DIR / "knots.csv"
 
 # Column Mapping
-COL_LEMMA = "Lemma"
+COL_LEMMA = "Λημμα (Lemma)"

@@ -1,7 +1,5 @@
 import pandas as pd
-import difflib
-import random
-import unicodedata
+import difflib, random, unicodedata
 from src.config import DATA_DIR, PROCESSED_DIR
 
 WORKSHEET_PATH = DATA_DIR / "kombyphantike_worksheet.csv"
@@ -17,10 +15,7 @@ class Examiner:
             print("Run 'src/kombyphantike.py' first.")
             exit()
 
-        # Load Worksheet
         self.df = pd.read_csv(WORKSHEET_PATH, dtype=str).fillna("")
-
-        # Filter for rows that actually have a target sentence
         self.df = self.df[self.df["Greek Translation / Target Sentence"] != ""]
 
         if self.df.empty:
@@ -56,13 +51,9 @@ class Examiner:
             if opcode == "equal":
                 print(f"  {user_input[a0:a1]}", end="")
             elif opcode == "insert":
-                print(
-                    f"[\033[92mMISSING: {target[b0:b1]}\033[0m]", end=""
-                )  # Green text for missing
+                print(f"[\033[92mMISSING: {target[b0:b1]}\033[0m]", end="")
             elif opcode == "delete":
-                print(
-                    f"[\033[91mDELETE: {user_input[a0:a1]}\033[0m]", end=""
-                )  # Red text for wrong extra
+                print(f"[\033[91mDELETE: {user_input[a0:a1]}\033[0m]", end="")
             elif opcode == "replace":
                 print(
                     f"[\033[91m{user_input[a0:a1]}\033[0m -> \033[92m{target[b0:b1]}\033[0m]",
@@ -74,10 +65,7 @@ class Examiner:
         print(f"\n--- SESSION START: {len(self.df)} SENTENCES ---")
         print("Type 'q' to quit. Type 'hint' for the first letter.")
 
-        # Convert to list of dicts for iteration
         cards = self.df.to_dict(orient="records")
-        # Optional: Shuffle? Let's keep order to follow the curriculum flow usually.
-        # random.shuffle(cards)
 
         score = 0
 

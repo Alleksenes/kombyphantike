@@ -9,7 +9,7 @@ This document maps the anatomy of the engine. It details how raw data is transmu
 ## I. The Oracle Layer (Ancient Lexicography)
 *Handling the raw TEI XML data of the Liddell-Scott-Jones (LSJ) Lexicon.*
 
-### `src/lsj_fuzzy_indexer.py` (The Oracle oIndexer)
+### `src/lsj_fuzzy_indexer.py` (The Oracle Indexer)
 Parses 27 volumes of LSJ XMLs into a high-speed JSON lookup (`lsj_index.json`).
 *   **The Poetic Miner:** A scoring algorithm that extracts literary citations. It prioritizes "Golden Authors" (Sophokles, Homeros et alii.) over prose, and penalizes fragmentary or untranslated citations.
 *   **Canonicalization:** Strips accents, breathings, and numbers from keys (`ἔχω` → `exw`) to ensure fuzzy matching across eras.
@@ -88,3 +88,5 @@ A CLI tool that tests syntax retention. It takes your filled Worksheet, blanks o
 
 ### `src/noun_declension_extractor.py` (The Raw Evidence)
 Extracts full declension tables for all nouns in the Kelly list. Used for debugging gender/declension class logic or building advanced declension drills.
+
+

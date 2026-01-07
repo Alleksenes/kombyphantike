@@ -1,7 +1,4 @@
-import logging
-import spacy
-import stanza
-import warnings
+import logging, spacy, stanza, warnings
 
 # Suppress Stanza/Torch warnings
 warnings.filterwarnings("ignore")

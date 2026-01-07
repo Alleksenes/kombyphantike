@@ -1,9 +1,7 @@
 import spacy
 import pandas as pd
-import logging
-import warnings
+import logging, warnings
 
-# Suppress warnings from spaCy about small models if any
 warnings.filterwarnings("ignore")
 
 logger = logging.getLogger(__name__)
@@ -13,7 +11,6 @@ class Analyzer:
     def __init__(self):
         logger.info("Loading English NLP model for semantic comparison...")
         try:
-            # We load the English model because the definitions are in English
             self.nlp = spacy.load("en_core_web_md")
         except OSError:
             logger.error(
@@ -73,7 +70,6 @@ class Analyzer:
     def apply_analysis(self, df: pd.DataFrame) -> pd.DataFrame:
         logger.info("Running AI Semantic Analysis...")
 
-        # Apply analysis
         results = df.apply(self.analyze_row, axis=1)
 
         df["Shift_Type"] = results[0]

@@ -23,10 +23,10 @@ def run_pipeline():
 
     # 4. Enrich (With Oracle Guidance)
     print("Weaving Etymologies (Lookup-Driven)...")
-    enricher = Enricher(lsj_oracle=lsj_oracle)  # <--- PASS ORACLE HERE
+    enricher = Enricher(lsj_oracle=lsj_oracle)
     df = enricher.enrich_data(df, lookup_data)
 
-    # 5. Enrich Definitions (Get the actual defs for the found antecedents)
+    # 5. Enrich Definitions
     print("Retrieving Ancient Definitions...")
     df = lsj_oracle.enrich(df)
 

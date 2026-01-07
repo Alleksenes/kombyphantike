@@ -1,6 +1,5 @@
 import pandas as pd
-import logging
-import re
+import logging, re
 from src.config import KNOTS_PATH
 
 logger = logging.getLogger(__name__)

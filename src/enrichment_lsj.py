@@ -1,7 +1,5 @@
-import json
 import pandas as pd
-import logging
-import unicodedata
+import logging, json, unicodedata
 from src.config import DICT_DIR
 from src.beta_code import BetaCodeConverter
 
@@ -60,7 +58,6 @@ class LSJEnricher:
 
         def lookup_row(word):
             data = self.get_data(word)
-            # Ensure we are grabbing 'cit' correctly
             return pd.Series(
                 [data.get("def", ""), data.get("aor", ""), data.get("cit", "")]
             )

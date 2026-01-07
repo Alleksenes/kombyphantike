@@ -1,5 +1,6 @@
 import gspread
 import pandas as pd
+import streamlit as st
 import logging, sys, os, json, traceback
 from dotenv import load_dotenv
 from src.config import BASE_DIR, DATA_DIR
@@ -20,7 +21,6 @@ CREDENTIALS_FILE = "kombyphantike-google-key.json"
 # Load Env
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
-# CONFIGURATION
 SHEET_KEY = os.getenv("GOOGLE_SHEET_ID")
 if not SHEET_KEY:
     logger.error("❌ GOOGLE_SHEET_ID not found in .env")
@@ -39,23 +39,32 @@ class CloudBridge:
 
     def connect(self):
         try:
-            logger.info(f"Authenticating with {CREDENTIALS_FILE}...")
-            self.gc = gspread.service_account(filename=CREDENTIALS_FILE)
+            # 1. Try Streamlit Secrets (Cloud Mode)
+            try:
+                import streamlit as st
 
+                if hasattr(st, "secrets") and "GOOGLE_CREDENTIALS" in st.secrets:
+                    logger.info("Authenticating via Streamlit Secrets...")
+                    creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+                    self.gc = gspread.service_account_from_dict(creds_dict)
+                else:
+                    raise ImportError("No secrets found")
+            except (ImportError, FileNotFoundError, Exception):
+                # 2. Fallback to Local JSON File (Local Mode)
+                logger.info(f"Authenticating with local file: {CREDENTIALS_FILE}...")
+                self.gc = gspread.service_account(filename=CREDENTIALS_FILE)
+
+            # 3. Open Sheet
             logger.info(f"Targeting Sheet Key: '{SHEET_KEY}'...")
             self.sh = self.gc.open_by_key(SHEET_KEY)
 
             logger.info(f"Connected to Document: {self.sh.title}")
 
-            # Target the specific tab "SENTENCES"
             try:
                 self.worksheet = self.sh.worksheet(TARGET_TAB_NAME)
                 logger.info(f"✅ Locked onto tab: '{TARGET_TAB_NAME}'")
             except gspread.WorksheetNotFound:
-                logger.error(f"❌ Tab '{TARGET_TAB_NAME}' NOT FOUND in this sheet.")
-                logger.info(
-                    f"Available tabs: {[s.title for s in self.sh.worksheets()]}"
-                )
+                logger.error(f"❌ Tab '{TARGET_TAB_NAME}' NOT FOUND.")
                 sys.exit(1)
 
         except Exception as e:

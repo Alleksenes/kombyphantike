@@ -126,13 +126,13 @@ class NounDeclensionExtractor:
                     if word not in self.target_lemmas:
                         continue
                     if word in seen_lemmas:
-                        continue  # Avoid duplicates
+                        continue
 
                     # Extract
                     row = self.extract_forms(entry)
 
                     # Basic validation: If it has no forms other than lemma, skip?
-                    # No, keep it, maybe it's indeclinable.
+                    # No keep it, maybe it's indeclinable.
 
                     self.data.append(row)
                     seen_lemmas.add(word)

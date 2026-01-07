@@ -1,8 +1,5 @@
-import json
 import pandas as pd
-import random
-import glob
-import os
+import random, json, glob, os
 from src.config import SESSIONS_DIR, DRILLS_FILE
 
 
@@ -35,7 +32,6 @@ class Driller:
         return latest_file
 
     def start(self):
-        # (Same logic as before...)
         drills = self.active_drills.to_dict(orient="records")
         if not drills:
             print(

@@ -1,13 +1,6 @@
 import pandas as pd
-import spacy
-import logging
-import random
 import numpy as np
-import math
-import re
-import json
-import os
-import warnings
+import math, spacy, logging, random, re, json, os, warnings
 from datetime import datetime
 from collections import Counter
 from src.config import PROCESSED_DIR, DATA_DIR
@@ -412,7 +405,7 @@ class KombyphantikeEngine:
         pool_string = "\n".join(pool_text)
 
         text = f"""
-### MISSION PROFILE: PROJECT ELLINIKA AGONA ###
+### MISSION PROFILE: PROJECT KOMBYPHANTIKE ###
 
 **ROLE:** Diachronic Greek Philologist & Logic Weaver.
 **THEME:** **{theme}**

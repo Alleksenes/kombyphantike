@@ -1,7 +1,5 @@
 import pandas as pd
-import json
-import logging
-import re
+import json, logging, re
 from src.config import KELLY_FILE, KAIKKI_FILE, PROCESSED_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -30,7 +28,7 @@ class DrillGenerator:
         if "}" in text or "{" in text:
             return False
         if "-" in text and len(text) < 3:
-            return False  # Skip suffixes
+            return False
         return True
 
     def extract_verb_forms(self, entry):
@@ -47,7 +45,6 @@ class DrillGenerator:
                 continue
 
             # 1. Aorist Active (1st Person Singular)
-            # We look for "past" AND "1s" (first person singular) AND NOT "passive"
             if "past" in tags and "1s" in tags and "active" in tags:
                 extracted["Aorist (1sg)"] = form_text
 
@@ -66,7 +63,6 @@ class DrillGenerator:
 
             # 5. Passive Participle (The -menos form)
             if "participle" in tags and "passive" in tags and "perfect" in tags:
-                # We usually want the perfect passive participle (grammenos)
                 extracted["Passive Participle"] = form_text
 
         for label, value in extracted.items():
@@ -166,7 +162,6 @@ class DrillGenerator:
                     continue
 
         df = pd.DataFrame(self.drills)
-        # Drop duplicates and sort
         df = df.drop_duplicates(subset=["Λήμμα (Lemma)", "Drill_Type"])
         df = df.sort_values(by=["Λήμμα (Lemma)", "POS"])
 

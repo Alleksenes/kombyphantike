@@ -1,7 +1,5 @@
 import xml.etree.ElementTree as ET
-import json
-import logging
-import re
+import json, logging, re
 from src.config import DICT_DIR
 from src.beta_code import BetaCodeConverter
 
@@ -288,14 +286,11 @@ def extract_citation_candidates(entry, converter):
             if child.tag == "tr" and child.text:
                 last_trans = child.text.strip()
 
-            # Check for Bibl that is NOT preceded by Foreign
             if child.tag == "bibl":
-                # Check previous sibling. If it was Foreign, Strategy 2 handled it.
                 prev = children[i - 1] if i > 0 else None
                 if prev is not None and prev.tag == "foreign":
-                    continue  # Handled by Strategy 2
+                    continue
 
-                # This is a Bibl standing alone (referring to Lemma)
                 raw_bibl = "".join(child.itertext()).strip()
                 full_bibl = expand_author(raw_bibl)
 
@@ -307,8 +302,7 @@ def extract_citation_candidates(entry, converter):
                     # Consttruct
                     formatted = f"{lemma_greek} '{last_trans}' ({full_bibl})"
 
-                    # Score it (High Auth, Low Quality because no unique text?)
-                    score = 40  # Base score for implicit citation
+                    score = 40
 
                     candidates.append(
                         {
