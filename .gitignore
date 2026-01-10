@@ -12,13 +12,17 @@ __pycache__/
 data/dictionaries/
 data/raw/
 data/sessions/
+*.json
 
 # Large binaries
 *.whl
 
-data/processed/
-data/kombyphantike_worksheet.csv
-data/ai_instruction.txt
+!data/processed/kelly.csv
+!data/processed/modern_drills.csv
+!data/processed/noun_declensions.csv
+!data/kombyphantike_worksheet.csv
+!data/ai_instruction.txt
+!data/dictionaries/knots.csv
 
 # Editor settings
 .vscode/
@@ -28,4 +32,9 @@ data/ai_instruction.txt
 poetry.lock
 
 # Keys
-kombyphantike-google-key.json
+#kombyphantike-google-key.json
+
+# private-git add .gitignorestudy
+# data/sessions/  <-- Unblocked for private backup
+# data/history/   <-- Unblocked
+# user_progress.json <-- Unblocked

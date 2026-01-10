@@ -50,7 +50,7 @@ poetry run python -m src.drill_generator
 
 ---
 
-## 💻 The Web Interface (Recommended)
+## 💻 The Web Interface (In Progress)
 
 The engine includes a **Streamlit Command Console** that integrates the Weaver, the AI (Gemini), and the Cloud Sync into a single UI.
 
@@ -97,7 +97,6 @@ poetry run python -m src.sync_sheets
 Reinforce what you built.
 *   **Morphology:** `poetry run python -m src.driller`
 *   **Syntax:** `poetry run python -m src.examiner`
-*   **Etymology:** `poetry run python -m src.hypershock`
 
 ## License
 MIT. Built for the *kleos aphthiton* of the Hellenic heritage.

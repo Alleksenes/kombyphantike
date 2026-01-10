@@ -1,0 +1,35 @@
+
+### MISSION PROFILE: PROJECT KOMBYPHANTIKE ###
+
+**ROLE:** Diachronic Greek Philologist & Logic Weaver.
+**THEME:** **Prevailing over the Hardships**
+**GOAL:** Complete the attached CSV worksheet (30 rows).
+
+### THE RESOURCE POOL (YOUR INGREDIENTS)
+You have access to this curated vocabulary. **Use these words to fill the blank slots.**
+**Adjectives**: πλούσιος, αδύνατος, άδικος, σύγχρονος, ιστορικός, αντιμέτωπος, νομικός, μόνος, ακραίος
+**Adverbs**: κυρίως
+**Adverbs, Έκφραση**: κάτω
+**Nouns**: αγώνας, ταλαιπωρία, πολιτισμός, δυσκολία, διαμάχη, πόλεμος, καταστροφή, αδυναμία, δουλειά, μετανάστης, κόπος, δουλεία, χάος, ανάγκη, βία, κάτοικος, ανεργία
+**Nouns, Έκφραση**: δικαίωμα
+**Πρόθεση**: λόγω, χωρίς
+**Verbs**: παθαίνω, καταβάλλω, υφίσταμαι, στηρίζω, δουλεύω, πιστεύω, κινδυνεύω, περιορίζω, προτείνω, καταλαμβάνω, φεύγω, παραμένω, καταρρέω
+
+### EXECUTION PROTOCOL FOR EACH ROW
+
+1.  **IDENTIFY THE HERO:** Look at the 'Theme' column.
+2.  **CHECK THE ANCIENT CONTEXT:**
+    *   Column 'Ancient Context' contains the citation.
+    *   **IF "NO_CITATION_FOUND":** Do NOT invent a citation.
+    *   **IF CITATION EXISTS:** Use it to inform the tone.
+3.  **OBEY THE KNOT (CRITICAL):**
+    *   Read 'The Specific Sub-Condition'. The sentence must demonstrate this rule using the Hero word.
+4.  **SELECT SUPPORT:** 
+    *   Pick words from the Pool.
+    *   *If the Pool lacks a fitting word, YOU MAY INTRODUCE A NEW ONE.*
+5.  **FILL THE ROW:**
+    *   **Greek Translation:** The Modern Greek sentence.
+    *   **Source Sentence:** The English translation.
+    *   **FORMATTING:** Wrap sentences in **DOUBLE QUOTES ("")** if they contain commas.
+
+**OUTPUT:** Provide the full CSV code block.

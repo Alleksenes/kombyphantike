@@ -24,6 +24,7 @@ python-dotenv = "^1.2.1"
 grc-odycy-joint-sm = {path = "./grc_odycy_joint_sm-0.1.0-py3-none-any.whl"}
 streamlit = "^1.52.2"
 google-generativeai = "^0.8.6"
+poetry-plugin-export = "^1.9.0"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29" # So you can use Jupyter notebooks in VS Code
