@@ -9,6 +9,7 @@
 ## 📚 Documentation
 *   [Architecture & Logic](docs/ARCHITECTURE.md) - How the "Jewel Hunter" and "Tournament" work.
 *   [Setup Guide](docs/SETUP_GUIDE.md) - Dependencies, API Keys, and Data Sources.
+* [Bibliography & Sources](docs/BIBLIOGRAPHY.md) - The Giants we stand on.
 
 ## 🏛️ Ὁ Ἀγών τοῦ Ὑφάντου (The Agon of the Weaver)
 
@@ -26,10 +27,19 @@ I needed a tool that respected my past. I needed a machine that could:
 We do not memorize lists. We weave **Language Islands** based on two coordinates:
 1.  **The Heritage (Deep Roots):** We prioritize words that have survived from Antiquity, explicitly linking them to their Ancient Antecedents and poetic contexts (Sophocles, Aeschylus).
 2.  **The Knot (Grammar Logic):** We isolate specific morphological rules (e.g., *Proparoxytone Nouns shifting stress in Genitive*) and force-multiply them into targeted drills.
+3.  **The Context (The Agora):** We mine real-world usage examples from the Hellenic Core (`kaikki-el` & `kaikki-en`) to ground the ancient roots in modern reality.
+
+## ⚙️ The Engine
+
+*   **The Oracle:** An LSJ Indexer that hunts for "Jewel" citations (Poets > Philosophers > Historians).
+*   **The Brain:** A Hybrid Ingestor that merges English and Greek Wiktionary data to find Compound Parents (`προβαίνω` < `βαίνω`).
+*   **The Weaver:** A Curriculum Generator that uses Semantic AI (`MPNet`) to curate words by Theme + Heritage + Frequency.
 
 ## 🚀 Quick Start
 
 ### 1. Installation
+
+This project uses **Poetry**.
 
 ```bash
 git clone https://github.com/alleksenes/kombyphantike.git
@@ -40,63 +50,60 @@ poetry install
 ### 2. Data Acquisition
 *(See [Setup Guide](docs/SETUP_GUIDE.md) for detailed instructions on acquiring the copyrighted datasets: Kelly List, Kaikki Dictionary, and LSJ XMLs).*
 
-### 3. Build the Engine
+*   Place kelly.csv in data/raw/.
+*   Place kaikki-el.jsonl and kaikki-en.jsonl in data/dictionaries/.
+*   Place LSJ XMLs in data/dictionaries/lsj_xml/.
+
+### 3. Build the Database (One-Time)
 Run these commands once to index the dictionaries and enrich the database.
 ```bash
+# 1. Build the Ancient Index (The Oracle)
 poetry run python -m src.lsj_fuzzy_indexer
+
+# 2. Ingest & Enrich (The Core)
 poetry run python -m src.main
+
+# 3. Forge Drills (The Armory)
 poetry run python -m src.drill_generator
 ```
 
 ---
 
-## 💻 The Web Interface (In Progress)
-
-The engine includes a **Streamlit Command Console** that integrates the Weaver, the AI (Gemini), and the Cloud Sync into a single UI.
-
-```bash
-poetry run streamlit run src/app.py
-```
-
-*   **Tab 1 (Weave):** Select a Theme ("Fate", "Sea") and generate a Curriculum.
-*   **Tab 2 (Ignite):** Send the curriculum to Google Gemini to auto-generate sentences.
-*   **Tab 3 (Sync):** Push your work to Google Sheets.
-*   **Tab 4 (Gym):** Practice Morphology and Syntax interactively.
-
----
-
-## ⚔️ The CLI Protocol (Manual Mode)
+## ⚔️ The Study Mode - Kombyphantike Batch (Manual Mode)
 
 If you prefer the command line or manual AI prompting:
 
-### 1. The Weaving
+### 1. Weaving The Curriculum
 Generate your daily curriculum based on a theme.
 ```bash
 poetry run python -m src.kombyphantike
 # Enter Theme: "Fate"
 # Enter Sentences: 50
 ```
-*   **Result:** Creates `data/kombyphantike_worksheet.csv` (The Template) and `data/ai_instruction.txt` (The Prompt).
+*   **Output**: data/kombyphantike_worksheet.csv (The Worksheet) + data/ai_instruction.txt (The Prompt).
+*   **Action**: Feed the prompt to an LLM. Paste the result back into the CSV.
 
-### 2. The Synthesis
-*   **Action:** Copy the text from `ai_instruction.txt`.
-*   **Action:** Paste it into a high-quality LLM.
-*   **Action:** Copy the CSV code block returned by the AI.
-*   **Action:** Paste it into `data/kombyphantike_worksheet.csv`, overwriting the file.
-
-### 3. The Sync
+### 2. The Sync & User Progress
 **Crucial:** This step saves your work to the Cloud and updates your local "Fatigue" stats so that the next session remains fresh.
-
 ```bash
 poetry run python -m src.sync_sheets
 ```
-*   **Push:** Uploads new sentences to your Master Google Sheet.
-*   **Pull:** Downloads history to update "Known Words" tracking.
+*   **Push (1)**: Uploads your curated and generated `kombyphantike_worksheet.csv` to Google Sheets.
 
-### 4. The Gym
+*   **Pull (2)**: Updates "Word Fatigue" and "Knot Fatigue" to ensure rotation.
+
+### 3. The Gym
 Reinforce what you built.
 *   **Morphology:** `poetry run python -m src.driller`
 *   **Syntax:** `poetry run python -m src.examiner`
+
+## Troubleshooting
+
+### CSV/Sync Errors
+If `sync_sheets.py` fails or uploads broken rows:
+1.  **Check Quotes:** Ensure the AI output in `kombyphantike_worksheet.csv` wraps every cell in double quotes (`"sentence"`), especially if it contains commas.
+2.  **Check Headers:** Ensure your Google Sheet has all columns matching the CSV headers.
+
 
 ## License
 MIT. Built for the *kleos aphthiton* of the Hellenic heritage.

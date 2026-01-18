@@ -1,11 +1,22 @@
 import pandas as pd
+import spacy
+import csv
+import logging
+import random
 import numpy as np
-import math, spacy, logging, random, re, json, os, warnings
+import math
+import sentence_transformers
+import re
+import json
+import os
+import warnings
+import textwrap
 from datetime import datetime
 from collections import Counter
 from src.config import PROCESSED_DIR, DATA_DIR
 from src.knot_loader import KnotLoader
 
+# Suppress warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 warnings.filterwarnings("ignore")
 logging.getLogger("transformers").setLevel(logging.ERROR)
@@ -21,6 +32,7 @@ WORKSHEET_OUTPUT = DATA_DIR / "kombyphantike_worksheet.csv"
 PROMPT_INSTRUCTION_FILE = DATA_DIR / "ai_instruction.txt"
 PROGRESS_FILE = DATA_DIR / "user_progress.json"
 SESSION_FILE = DATA_DIR / "current_session.json"
+PARADIGMS_PATH = PROCESSED_DIR / "paradigms.json"
 
 
 class KombyphantikeEngine:
@@ -54,6 +66,12 @@ class KombyphantikeEngine:
             with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
                 self.progress = json.load(f)
 
+        # Load Paradigms for Cross-Mining
+        self.paradigms = {}
+        if PARADIGMS_PATH.exists():
+            with open(PARADIGMS_PATH, "r", encoding="utf-8") as f:
+                self.paradigms = json.load(f)
+
         # PRE-PROCESSING SCORES
         self.kelly["ID"] = pd.to_numeric(self.kelly["ID"], errors="coerce")
         self.kelly = self.kelly[self.kelly["ID"].notna()]
@@ -63,17 +81,20 @@ class KombyphantikeEngine:
             self.kelly["Similarity_Score"], errors="coerce"
         ).fillna(0)
 
+        self.use_transformer = False
         try:
             from sentence_transformers import SentenceTransformer, util
 
             print("Loading Neural Semantic Model...")
-            self.model = SentenceTransformer("all-MiniLM-L6-v2")
+            # If you want to use local:
+            # self.model = SentenceTransformer('./models/mpnet')
+            # If you want to use cache (which you downloaded via git lfs):
+            self.model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
             self.use_transformer = True
-        except:
-            print("SentenceTransformer not found. Falling back to SpaCy.")
+        except Exception as e:
+            print(f"SentenceTransformer not found: {e}")
             try:
                 self.nlp = spacy.load("en_core_web_md")
-                self.use_transformer = False
             except:
                 print("Spacy missing.")
                 exit()
@@ -92,7 +113,6 @@ class KombyphantikeEngine:
     def get_usage_count(self, lemma):
         return self.progress.get(lemma, {}).get("count", 0)
 
-    # --- KNOT FATIGUE ---
     def update_knot_usage(self, knot_id):
         today = datetime.now().strftime("%Y-%m-%d")
         key = f"KNOT_{knot_id}"
@@ -116,12 +136,18 @@ class KombyphantikeEngine:
 
     def select_words(self, theme, target_word_count):
         print(f"Curating ~{target_word_count} words for theme: '{theme}'...")
-
         candidates = self.kelly.copy()
 
         if self.use_transformer:
-            candidates = candidates[candidates["Modern_Def"].notna()]
-            definitions = candidates["Modern_Def"].tolist()
+            # Prioritize Greek Def, fallback to English
+            candidates["Target_Def"] = candidates["Greek_Def"].fillna(
+                candidates["Modern_Def"]
+            )
+            candidates = candidates[
+                candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
+            ]
+            definitions = candidates["Target_Def"].tolist()
+
             from sentence_transformers import util
 
             theme_emb = self.model.encode(theme, convert_to_tensor=True)
@@ -225,8 +251,6 @@ class KombyphantikeEngine:
 
                 regex = self.knot_loader.construct_regex(knot["Regex_Ending"])
                 try:
-                    import re
-
                     if re.search(regex, lemma):
                         knot_counts[knot["Knot_ID"]] += 1
                         knot_map[knot["Knot_ID"]] = knot
@@ -238,14 +262,11 @@ class KombyphantikeEngine:
         num_morpho = math.ceil(target_knot_count * 0.7)
         num_syntax = target_knot_count - num_morpho
 
-        # Sort Morpho Knots by Fatigue (Least Used First)
         candidates = []
         for kid, _ in knot_counts.most_common():
             candidates.append(knot_map[kid])
-
         candidates.sort(key=lambda k: self.get_knot_usage(k["Knot_ID"]))
 
-        # Diversity Filter (Max 2 per Parent)
         top_morpho = []
         parent_counts = Counter()
         for knot in candidates:
@@ -260,7 +281,6 @@ class KombyphantikeEngine:
             self.knot_loader.knots["POS_Tag"] == "Syntax"
         ]
         if not syntax_pool.empty:
-            # Sort syntax by fatigue too
             syntax_list = [row for _, row in syntax_pool.iterrows()]
             syntax_list.sort(key=lambda k: self.get_knot_usage(k["Knot_ID"]))
             top_syntax = syntax_list[:num_syntax]
@@ -279,6 +299,20 @@ class KombyphantikeEngine:
         print(f"--- CONFIGURATION ---")
         print(f"Target Sentences: {target_sentences}")
 
+        # 1. BUILD CORPUS FOR CROSS-MINING
+        print("Indexing Corpus for Cross-Reference...")
+        corpus = []
+        # Optimization: Filter out empty examples
+        valid_examples = self.kelly[
+            self.kelly["Modern_Examples"].notna()
+            & (self.kelly["Modern_Examples"] != "")
+        ]
+        for ex_str in valid_examples["Modern_Examples"]:
+            sentences = str(ex_str).split(" || ")
+            for s in sentences:
+                corpus.append(s)
+        print(f"Corpus Size: {len(corpus)} sentences.")
+
         words_df = self.select_words(theme, target_word_count)
         selected_knots = self.select_strategic_knots(words_df, target_knot_count)
 
@@ -287,7 +321,9 @@ class KombyphantikeEngine:
             "date": datetime.now().strftime("%Y-%m-%d"),
             "theme": theme,
             "words": words_df.to_dict(orient="records"),
-            "knots": [k.to_dict() for k in selected_knots],
+            "knots": [
+                k.to_dict() if hasattr(k, "to_dict") else k for k in selected_knots
+            ],
         }
         with open(SESSION_FILE, "w", encoding="utf-8") as f:
             json.dump(session_data, f, ensure_ascii=False, indent=2)
@@ -298,16 +334,15 @@ class KombyphantikeEngine:
         used_heroes = set()
 
         for knot in selected_knots:
-            self.update_knot_usage(knot["Knot_ID"])  # TRACK KNOT FATIGUE
+            self.update_knot_usage(knot["Knot_ID"])
 
             candidates = []
             if knot["Regex_Ending"]:
                 regex = self.knot_loader.construct_regex(knot["Regex_Ending"])
-                import re
-
                 matches = words_df[
                     words_df["Lemma"].str.contains(regex, regex=True, na=False)
                 ]
+                candidates = matches["Lemma"].tolist()
 
                 if knot["POS_Tag"] == "Noun" and knot.get("Morpho_Constraint"):
                     target_gender = knot["Morpho_Constraint"]
@@ -323,6 +358,33 @@ class KombyphantikeEngine:
             if not candidates:
                 candidates = words_df["Lemma"].sample(min(5, len(words_df))).tolist()
 
+            knot_desc = str(knot.get("Description", "")) + str(knot.get("Nuance", ""))
+            requires_plural = (
+                "plural" in knot_desc.lower() or "pl." in knot_desc.lower()
+            )
+
+            if requires_plural:
+                valid_candidates = (
+                    []
+                )  # this will be enlarged as valid candidates require more filters
+                for cand in candidates:
+                    if cand in self.paradigms:
+                        forms = self.paradigms[cand]
+                        # Check if any form has 'plural' or 'πληθυντικός' tag
+                        has_plural = any(
+                            "plural" in str(f.get("tags", [])).lower()
+                            or "πληθυντικός" in str(f.get("raw_tags", [])).lower()
+                            for f in forms
+                        )
+                        if has_plural:
+                            valid_candidates.append(cand)
+                    else:
+                        # If no paradigm found, keep it (benefit of doubt)
+                        valid_candidates.append(cand)
+
+                if valid_candidates:
+                    candidates = valid_candidates
+
             candidates.sort(key=lambda w: self.get_usage_count(w))
 
             for i in range(SENTENCES_PER_KNOT):
@@ -337,15 +399,75 @@ class KombyphantikeEngine:
                 used_heroes.add(hero)
                 self.update_usage(hero)
 
-                # STRICT CONTEXT FETCH
                 hero_row = words_df[words_df["Lemma"] == hero].iloc[0]
-                raw_ctx = hero_row.get("Ancient_Context", "")
 
-                # ANTI-HALLUCINATION
-                if pd.isna(raw_ctx) or str(raw_ctx).strip() == "":
-                    ancient_ctx = "NO_CITATION_FOUND"
+                # ANCIENT CONTEXT
+                raw_ctx = hero_row.get("Ancient_Context", "")
+                ancient_ctx = (
+                    "NO_CITATION_FOUND"
+                    if pd.isna(raw_ctx) or str(raw_ctx).strip() == ""
+                    else raw_ctx
+                )
+
+                # MODERN CONTEXT (CROSS-MINING)
+                modern_ctx = ""
+
+                # 1. Own Examples
+                raw_mod = hero_row.get("Modern_Examples", "")
+                hero_context = []
+                if pd.notna(raw_mod) and str(raw_mod).strip() not in ["", "nan"]:
+                    hero_context.extend(str(raw_mod).split(" || "))
+
+                # 2. Cross-Mine
+                # Get forms
+                hero_forms = set([hero])
+                if hero in self.paradigms:
+                    for f in self.paradigms[hero]:
+                        hero_forms.add(f["form"])
+
+                # Scan Corpus (Limit to 3 extra)
+                found_count = 0
+                for sentence in corpus:
+                    if found_count >= 3:
+                        break
+                    if sentence in hero_context:
+                        continue  # Skip dupes
+
+                    # Regex Word Boundary Check
+                    for form in hero_forms:
+                        if re.search(
+                            rf"\b{re.escape(form)}\b", sentence, re.IGNORECASE
+                        ):
+                            hero_context.append(sentence)
+                            found_count += 1
+                            break
+
+                # Fallback to Definition if empty
+                if hero_context:
+                    modern_ctx = " || ".join(hero_context[:5])
                 else:
-                    ancient_ctx = raw_ctx
+                    # 2. Fallback to Greek Def
+                    raw_def_el = hero_row.get("Greek_Def", "")
+                    if pd.notna(raw_def_el) and str(raw_def_el).strip() not in [
+                        "",
+                        "nan",
+                    ]:
+                        modern_ctx = f"DEF (EL): {raw_def_el}"
+                    else:
+                        # 3. Fallback to English Def
+                        raw_def_en = hero_row.get("Modern_Def", "")
+                        if pd.notna(raw_def_en) and str(raw_def_en).strip() not in [
+                            "",
+                            "nan",
+                        ]:
+                            modern_ctx = f"DEF (EN): {raw_def_en}"
+                        else:
+                            # 4. Fallback to Synonyms
+                            syns = hero_row.get("Synonyms", "")
+                            if pd.notna(syns) and str(syns).strip() not in ["", "nan"]:
+                                modern_ctx = f"SYN: {syns}"
+                            else:
+                                modern_ctx = "NO_CONTEXT_FOUND"
 
                 core_v = hero if knot["POS_Tag"] == "Verb" else ""
                 core_adj = hero if knot["POS_Tag"] == "Adjective" else ""
@@ -361,6 +483,7 @@ class KombyphantikeEngine:
                     "Optional Core Vocab (Praepositio)": "",
                     "Optional Core Vocab (Adverb)": "",
                     "Ancient Context": ancient_ctx,
+                    "Modern Context": modern_ctx,
                     "Theme": f"{theme} (Focus: {hero})",
                 }
                 rows.append(row)
@@ -377,6 +500,7 @@ class KombyphantikeEngine:
             "Optional Core Vocab (Praepositio)",
             "Optional Core Vocab (Adverb)",
             "Ancient Context",
+            "Modern Context",
             "Theme",
         ]
         for c in cols:
@@ -384,7 +508,9 @@ class KombyphantikeEngine:
                 df[c] = ""
 
         df = df[cols]
-        df.to_csv(WORKSHEET_OUTPUT, index=False, encoding="utf-8-sig")
+        df.to_csv(
+            WORKSHEET_OUTPUT, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_ALL
+        )
 
         self.save_progress()
         self.generate_ai_instruction(theme, target_sentences, words_df)
@@ -405,37 +531,43 @@ class KombyphantikeEngine:
         pool_string = "\n".join(pool_text)
 
         text = f"""
-### MISSION PROFILE: PROJECT KOMBYPHANTIKE ###
+### SYSTEM DESIGNATION: DIGITAL HUMANITIES RESEARCH ASSOCIATE ###
 
-**ROLE:** Diachronic Greek Philologist & Logic Weaver.
+**ROLE:** You are the Research Assistant to the Lead Classical Philologist of Project Kombyphantike.
+**CONTEXT:** You are operating within a strict Python/Google Sheets data pipeline. The user (Lead Philologist) has established a scalable learning tool that bridges Ancient and Modern Greek.
+**OPERATIONAL BOUNDARIES:** Your output will be parsed programmatically. Any alteration to the schema, headers, or existing data columns (citations/IDs) will cause a pipeline failure.
+
 **THEME:** **{theme}**
-**GOAL:** Complete the attached CSV worksheet ({count} rows).
+**TASK:** Interpolate missing data for the attached CSV worksheet ({count} rows).
 
-### THE RESOURCE POOL (YOUR INGREDIENTS)
-You have access to this curated vocabulary. **Use these words to fill the blank slots.**
+### THE RESOURCE POOL (SEMANTIC INGREDIENTS)
+**Instruction:** You must draw from this pool to construct natural, high-register sentences. Do not force "garbage" sentences; use these words to create meaningful scenarios relevant to the Theme.
 {pool_string}
 
-### EXECUTION PROTOCOL FOR EACH ROW
+### EXECUTION PROTOCOL (STRICT COMPLIANCE)
 
-1.  **IDENTIFY THE HERO:** Look at the 'Theme' column.
-2.  **CHECK THE ANCIENT CONTEXT:**
-    *   Column 'Ancient Context' contains the citation.
-    *   **IF "NO_CITATION_FOUND":** Do NOT invent a citation.
-    *   **IF CITATION EXISTS:** Use it to inform the tone.
-3.  **OBEY THE KNOT (CRITICAL):**
-    *   Read 'The Specific Sub-Condition'. The sentence must demonstrate this rule using the Hero word.
-4.  **SELECT SUPPORT:** 
-    *   Pick words from the Pool.
-    *   *If the Pool lacks a fitting word, YOU MAY INTRODUCE A NEW ONE.*
-5.  **FILL THE ROW:**
-    *   **Greek Translation:** The Modern Greek sentence.
-    *   **Source Sentence:** The English translation.
-    *   **FORMATTING:** Wrap sentences in **DOUBLE QUOTES ("")** if they contain commas.
+1.  **PROTOCOL: DATA IMMUTABILITY (CRITICAL)**
+    * **READ-ONLY ZONES:** You are strictly FORBIDDEN from modifying, deleting, or summarizing the following columns: `Knot ID`, `Parent Concept`, `The Specific Sub-Condition / Nuance`, `Ancient Context`, `Modern Context`.
+    * **PRESERVATION:** You must echo these columns back *exactly* as they appear in the input, ensuring all citations and ancient/modern source texts remain 100% intact.
 
-**OUTPUT:** Provide the full CSV code block.
+2.  **PROTOCOL: THE LIVING BRIDGE (CONTENT GENERATION)**
+    * **The Hero Word:** Identify the hero word in the 'Theme' column.
+    * **The Syntax:** Construct a Modern Greek sentence (`Greek Translation`) that strictly follows the morphological rule in the `Knot ID` column.
+    * **The Semantics:** The sentence should be colloquial yet educated—the voice of a philologist living in the modern world.
+    * **Resource Integration:** You MUST incorporate at least **2 additional words** from the Resource Pool into the sentence to ensure lexical richness.
+
+3.  **PROTOCOL: ANNOTATION**
+    * **The Knot Note:** In the `The Specific Sub-Condition / Nuance` column, RETAIN the original text and APPEND a note in brackets explaining your grammatical decision: `... [APPLIED: Genitive Plural 'ασκήσεων' for stress shift]`.
+    * **Vocab Logging:** You MUST populate the `Core Vocab (Verb)` and `Core Vocab (Adjective)` columns with the exact words you used from the pool.
+
+4.  **PROTOCOL: OUTPUT FORMAT**
+    * Return **ONLY** the raw CSV code block.
+    * **Quote All Cells:** `"Sentence","Translation","Knot [Note]","Verb","Adj",...`
+    * **No Markdown/Chatter:** Do not provide conversational filler before or after the CSV block.
+
 """
         with open(PROMPT_INSTRUCTION_FILE, "w", encoding="utf-8") as f:
-            f.write(text)
+            f.write(text.strip())
 
 
 if __name__ == "__main__":

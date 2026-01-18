@@ -19,7 +19,8 @@ KELLY_FILE = DICT_DIR / "KELLY_EL.xlsx"
 OUTPUT_FILE = PROCESSED_DIR / "kelly.csv"
 
 # 3. Dictionaries
-KAIKKI_FILE = DICT_DIR / "kaikki.org-dictionary-Greek.jsonl"
+KAIKKI_EL_FILE = DICT_DIR / "kaikki-el.jsonl"  # The Master Source
+KAIKKI_EN_FILE = DICT_DIR / "kaikki-en.jsonl"  # The Translation Source
 LSJ_INDEX_FILE = DICT_DIR / "lsj_index.json"
 
 # 4. Drills & Knots

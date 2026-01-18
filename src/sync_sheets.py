@@ -1,7 +1,7 @@
 import gspread
 import pandas as pd
-import streamlit as st
 import logging, sys, os, json, traceback
+from datetime import datetime
 from dotenv import load_dotenv
 from src.config import BASE_DIR, DATA_DIR
 
@@ -39,22 +39,10 @@ class CloudBridge:
 
     def connect(self):
         try:
-            # 1. Try Streamlit Secrets (Cloud Mode)
-            try:
-                import streamlit as st
+            logger.info(f"Authenticating with local file: {CREDENTIALS_FILE}...")
+            self.gc = gspread.service_account(filename=CREDENTIALS_FILE)
 
-                if hasattr(st, "secrets") and "GOOGLE_CREDENTIALS" in st.secrets:
-                    logger.info("Authenticating via Streamlit Secrets...")
-                    creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-                    self.gc = gspread.service_account_from_dict(creds_dict)
-                else:
-                    raise ImportError("No secrets found")
-            except (ImportError, FileNotFoundError, Exception):
-                # 2. Fallback to Local JSON File (Local Mode)
-                logger.info(f"Authenticating with local file: {CREDENTIALS_FILE}...")
-                self.gc = gspread.service_account(filename=CREDENTIALS_FILE)
-
-            # 3. Open Sheet
+            # Open Sheet
             logger.info(f"Targeting Sheet Key: '{SHEET_KEY}'...")
             self.sh = self.gc.open_by_key(SHEET_KEY)
 
@@ -80,14 +68,16 @@ class CloudBridge:
             return
 
         try:
-            # Robust CSV Reading
+            # Robust CSV Reading with Error Reporting
             df = pd.read_csv(
-                WORKSHEET_PATH,
-                engine="python",
-                on_bad_lines="warn",  # Skip bad lines, don't crash
+                WORKSHEET_PATH, engine="python", on_bad_lines="error", quotechar='"'
             ).fillna("")
         except Exception as e:
-            logger.error(f"Critical CSV Error: {e}")
+            logger.error("❌ CSV PARSING ERROR: Likely unquoted commas.")
+            logger.error(f"Details: {e}")
+            logger.info(
+                '👉 ACTION: Open the CSV. Wrap sentences with commas in "double quotes".'
+            )
             return
 
         target_col = "Greek Translation / Target Sentence"
@@ -115,7 +105,7 @@ class CloudBridge:
             logger.error(f"Upload failed: {e}")
 
     def pull_stats_from_cloud(self):
-        logger.info(f"--- STARTING PULL (CLOUD '{TARGET_TAB_NAME}' -> LOCAL STATS) ---")
+        logger.info(f"--- STARTING PULL (CLOUD -> LOCAL STATS) ---")
 
         try:
             raw_data = self.worksheet.get_all_records()
@@ -134,43 +124,63 @@ class CloudBridge:
             with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
                 progress = json.load(f)
         else:
-            progress = {}
+            progress = {"words": {}, "knots": {}}
 
-        # Define columns that contain vocabulary
+        # Ensure structure
+        if "words" not in progress:
+            progress["words"] = {}
+        if "knots" not in progress:
+            progress["knots"] = {}
+
+        # 1. WORD STATS
         vocab_cols = [
             "Core Vocab (Verb)",
             "Core Vocab (Adjective)",
             "Optional Core Vocab (Praepositio)",
             "Optional Core Vocab (Adverb)",
         ]
-
         available_cols = [c for c in vocab_cols if c in df.columns]
 
-        # Calculate totals from Cloud
-        cloud_counts = {}
+        cloud_word_counts = {}
         for _, row in df.iterrows():
             for col in available_cols:
                 word = str(row[col]).replace("*", "").strip()
                 if word:
-                    cloud_counts[word] = cloud_counts.get(word, 0) + 1
+                    cloud_word_counts[word] = cloud_word_counts.get(word, 0) + 1
 
-        updates = 0
-        for word, count in cloud_counts.items():
-            if word not in progress:
-                progress[word] = {
-                    "count": 0,
-                    "last_used": datetime.now().strftime("%Y-%m-%d"),
-                }
+        updates_w = 0
+        for word, count in cloud_word_counts.items():
+            if word not in progress["words"]:
+                progress["words"][word] = {"count": 0, "last_used": ""}
 
-            # Sync count (Cloud is Master)
-            if count > progress[word]["count"]:
-                progress[word]["count"] = count
-                updates += 1
+            if count > progress["words"][word]["count"]:
+                progress["words"][word]["count"] = count
+                updates_w += 1
 
+        # 2. KNOT STATS (New Feature)
+        cloud_knot_counts = {}
+        if "Knot ID" in df.columns:
+            for kid in df["Knot ID"]:
+                kid = str(kid).strip()
+                if kid:
+                    cloud_knot_counts[kid] = cloud_knot_counts.get(kid, 0) + 1
+
+        updates_k = 0
+        for kid, count in cloud_knot_counts.items():
+            if kid not in progress["knots"]:
+                progress["knots"][kid] = {"count": 0, "last_used": ""}
+
+            if count > progress["knots"][kid]["count"]:
+                progress["knots"][kid]["count"] = count
+                updates_k += 1
+
+        # Save
         with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
             json.dump(progress, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"✅ Sync Complete. Updated stats for {updates} words.")
+        logger.info(
+            f"✅ Sync Complete. Updated {updates_w} words and {updates_k} knots."
+        )
 
 
 if __name__ == "__main__":
@@ -184,3 +194,6 @@ if __name__ == "__main__":
         bridge.push_local_to_cloud()
     elif choice == "2":
         bridge.pull_stats_from_cloud()
+    else:
+        print("Invalid choice. Exiting.")
+        sys.exit(1)

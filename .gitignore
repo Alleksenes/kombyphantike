@@ -9,20 +9,21 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Heavy / Copyrighted Data (User must download)
+data/
 data/dictionaries/
 data/raw/
+data/processed/
 data/sessions/
+data/history/
 *.json
+models/
 
 # Large binaries
 *.whl
 
-!data/processed/kelly.csv
-!data/processed/modern_drills.csv
-!data/processed/noun_declensions.csv
-!data/kombyphantike_worksheet.csv
-!data/ai_instruction.txt
-!data/dictionaries/knots.csv
+# Generated Files
+data/kombyphantike_worksheet.csv
+data/ai_instruction.txt
 
 # Editor settings
 .vscode/
@@ -32,9 +33,4 @@ data/sessions/
 poetry.lock
 
 # Keys
-#kombyphantike-google-key.json
-
-# private-git add .gitignorestudy
-# data/sessions/  <-- Unblocked for private backup
-# data/history/   <-- Unblocked
-# user_progress.json <-- Unblocked
+kombyphantike-google-key.json

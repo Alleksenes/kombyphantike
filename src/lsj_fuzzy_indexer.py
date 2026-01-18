@@ -1,5 +1,7 @@
 import xml.etree.ElementTree as ET
-import json, logging, re
+import json
+import logging
+import re
 from src.config import DICT_DIR
 from src.beta_code import BetaCodeConverter
 
@@ -10,7 +12,7 @@ LSJ_DIR = DICT_DIR / "lsj_xml"
 OUTPUT_INDEX = DICT_DIR / "lsj_index.json"
 ABBREV_FILE = DICT_DIR / "abbreviations.json"
 
-# --- SCORING WEIGHTS ---
+# --- TIER DEFINITIONS ---
 TIER_GOD = [
     "Soph.",
     "S.",
@@ -23,9 +25,10 @@ TIER_GOD = [
     "Od.",
     "Pind.",
     "Pi.",
+    "Hes.",
 ]
-TIER_PHIL = ["Pl.", "Arist."]
-TIER_HIST = ["Hdt.", "Th.", "X."]
+TIER_PHIL = ["Pl.", "Arist.", "X."]
+TIER_HIST = ["Hdt.", "Th.", "D.H.", "Plb."]
 
 # LOAD ABBREVIATIONS
 ABBREV_MAP = {}
@@ -63,14 +66,11 @@ def is_greek(text):
 
 
 def clean_rich_trans(text):
-    """Cleans up captured translation text."""
     if not text:
         return ""
-    # Remove leading/trailing junk
     text = text.strip(" [](),;.")
     if len(text) < 2:
         return ""
-    # Filter bibliographic placeholders
     if text.lower() in ["ib", "id", "ibid", "op. cit.", "loc. cit."]:
         return ""
     return text
@@ -119,53 +119,39 @@ def extract_aorist(entry, converter):
     return ""
 
 
-def get_author_score(author_str):
+def get_author_tier(author_str):
     if not author_str:
-        return 0
+        return 4  # Standard
     for a in TIER_GOD:
         if a in author_str:
-            return 60
+            return 1
     for a in TIER_PHIL:
         if a in author_str:
-            return 30
+            return 2
     for a in TIER_HIST:
         if a in author_str:
-            return 10
+            return 3
     if "IG" in author_str or "Schol." in author_str:
-        return -50
-    return 0
+        return 5  # Trash
+    return 4
 
 
-def get_quality_score(greek_text, has_translation, author_score):
-    score = 0
-    word_count = len(greek_text.split())
-
-    # 1. TRANSLATION IS KING
-    if has_translation:
-        score += 50
-
-    # 2. Penalize Noise
-    if "[" in greek_text or "]" in greek_text:
-        score -= 20
-    if "π." in greek_text or "κ." in greek_text:
-        if word_count < 5:
-            score -= 10
-
-    # 3. Penalize Fragments
-    if word_count < 2:
-        score -= 40
-
-    # 4. Length Sweet Spot
-    if 3 <= word_count <= 15:
-        score += 20
-    if word_count > 5:
-        score += 10
-
-    # 5. Penalize No-Translation UNLESS it's a God Tier Poet
-    if not has_translation and author_score < 50:
-        score -= 20
-
-    return score
+def extract_definition_flow(entry, converter):
+    def_parts = []
+    for sense in entry.findall(".//sense"):
+        for child in sense:
+            if child.tag == "tr" and child.text:
+                def_parts.append(child.text.strip().strip(",;"))
+            elif child.tag == "foreign" and child.text:
+                beta = child.text
+                greek = converter.to_greek(beta)
+                if len(greek.split()) < 4:
+                    def_parts.append(greek)
+            if child.tag == "bibl" or child.tag == "cit":
+                break
+        if def_parts:
+            break
+    return "; ".join(def_parts)
 
 
 def get_text_between_siblings(start_node, end_node, parent):
@@ -187,55 +173,58 @@ def get_text_between_siblings(start_node, end_node, parent):
     return " ".join(text_parts).replace(" ,", ",").replace(" .", ".")
 
 
-def is_golden_author(author_text):
-    for giant in [
-        "Sophocles",
-        "Homer",
-        "Euripides",
-        "Aeschylus",
-        "Plato",
-        "Aristophanes",
-        "Thucydides",
-        "Herodotus",
-        "Pindar",
-        "Hesiod",
-        "Sappho",
-    ]:
-        if giant in author_text:
-            return True
-    return False
-
-
-def extract_citation_candidates(entry, converter):
+def extract_citation_candidates(entry, converter, fallback_def=""):
     candidates = []
 
-    # STRATEGY 1: CIT
+    # STRATEGY 1: CIT (Explicit Citation Blocks)
     for cit in entry.findall(".//cit"):
         quote_tag = cit.find(".//quote")
         bibl_tag = cit.find(".//bibl")
+
+        # Check for Translation inside CIT
+        tr_tag = cit.find(".//tr")
+        trans_text = ""
+        if tr_tag is not None and tr_tag.text:
+            trans_text = tr_tag.text.strip()
+
         if quote_tag is not None and quote_tag.text:
             beta = quote_tag.text
-            # Clean brackets immediately
             greek = converter.to_greek(beta).replace("[", "").replace("]", "")
-
             raw_bibl = (
                 "".join(bibl_tag.itertext()).strip() if bibl_tag is not None else ""
             )
 
-            auth_score = get_author_score(raw_bibl)
-            # CIT usually lacks translation inside tag
-            qual_score = get_quality_score(greek, False, auth_score)
+            tier = get_author_tier(raw_bibl)
+            word_count = len(greek.split())
+            has_trans = len(trans_text) > 0
 
-            total = auth_score + qual_score
-            if total > 0:
-                candidates.append(
-                    {"quote": greek, "trans": "", "author": raw_bibl, "score": total}
-                )
+            candidates.append(
+                {
+                    "quote": greek,
+                    "trans": trans_text,
+                    "author": raw_bibl,
+                    "tier": tier,
+                    "length": word_count,
+                    "has_trans": has_trans,
+                }
+            )
 
-    # STRATEGY 2: SIBLING SCAN
+    # STRATEGY 2 & 3: SIBLING SCAN & IMPLICIT
+    # We scan senses to find flow
+
+    # Initialize with the main definition as a fallback translation
+    # This fixes cases where the definition is global but citation is local
+    last_trans = fallback_def
+
     for sense in entry.findall(".//sense"):
         children = list(sense)
         for i, child in enumerate(children):
+
+            # Update Translation Context
+            if child.tag == "tr" and child.text:
+                last_trans = child.text.strip()
+
+            # STRATEGY 2: Explicit Greek (<foreign>)
             if child.tag == "foreign" and child.text:
                 bibl_node = None
                 for offset in range(1, 6):
@@ -250,75 +239,76 @@ def extract_citation_candidates(entry, converter):
 
                 if bibl_node is not None:
                     beta = child.text
-                    # Clean brackets immediately
                     greek = converter.to_greek(beta).replace("[", "").replace("]", "")
-
                     raw_bibl = "".join(bibl_node.itertext()).strip()
-
                     rich_trans = get_text_between_siblings(child, bibl_node, sense)
                     rich_trans = clean_rich_trans(re.sub(r"\s+", " ", rich_trans))
 
+                    tier = get_author_tier(raw_bibl)
+                    word_count = len(greek.split())
                     has_trans = len(rich_trans) > 0
 
-                    auth_score = get_author_score(raw_bibl)
-                    qual_score = get_quality_score(greek, has_trans, auth_score)
+                    candidates.append(
+                        {
+                            "quote": greek,
+                            "trans": rich_trans,
+                            "author": raw_bibl,
+                            "tier": tier,
+                            "length": word_count,
+                            "has_trans": has_trans,
+                        }
+                    )
 
-                    total = auth_score + qual_score
-
-                    if total > 0:
-                        candidates.append(
-                            {
-                                "quote": greek,
-                                "trans": rich_trans,
-                                "author": raw_bibl,
-                                "score": total,
-                            }
-                        )
-
-    # STRATEGY 3: IMPLICIT CITATIONS (Bibl without Foreign)
-
-    last_trans = ""
-
-    for sense in entry.findall(".//sense"):
-        children = list(sense)
-        for i, child in enumerate(children):
-
-            if child.tag == "tr" and child.text:
-                last_trans = child.text.strip()
-
+            # STRATEGY 3: IMPLICIT CITATIONS (Bibl without Foreign)
             if child.tag == "bibl":
                 prev = children[i - 1] if i > 0 else None
                 if prev is not None and prev.tag == "foreign":
-                    continue
+                    continue  # Handled by Strategy 2
 
                 raw_bibl = "".join(child.itertext()).strip()
-                full_bibl = expand_author(raw_bibl)
+                tier = get_author_tier(raw_bibl)
 
-                # Only grab if Golden Author (otherwise too much noise)
-                if is_golden_author(full_bibl):
+                # Accept Poets (1) and Philosophers (2)
+                # If we have a translation (even fallback), we take it.
+                if tier <= 2 and last_trans:
                     lemma_beta = entry.get("key")
-                    lemma_greek = converter.to_greek(lemma_beta).split("^")[0]
+                    lemma_greek = (
+                        converter.to_greek(lemma_beta)
+                        .replace("^", "")
+                        .replace("1", "")
+                        .replace("2", "")
+                    )
 
-                    # Consttruct
-                    formatted = f"{lemma_greek} '{last_trans}' ({full_bibl})"
-
-                    score = 40
+                    # Remove numbers from lemma (e.g. θεολόγος1)
+                    lemma_greek = re.sub(r"\d+", "", lemma_greek)
 
                     candidates.append(
                         {
                             "quote": lemma_greek,
                             "trans": last_trans,
                             "author": raw_bibl,
-                            "score": score,
+                            "tier": tier,
+                            "length": 1,
+                            "has_trans": True,  # We treat the def as trans
                         }
                     )
 
-    candidates.sort(key=lambda x: x["score"], reverse=True)
-    return candidates
+    # THE WATERFALL SORT
+    candidates.sort(
+        key=lambda x: (
+            x["tier"],  # 1 is best
+            not x["has_trans"],  # False (Has) is best
+            -x["length"],  # Longest is best
+        )
+    )
+
+    # Filter Garbage
+    final = [c for c in candidates if c["tier"] < 5 and c["length"] > 0]
+    return final
 
 
 def build_index():
-    print(f"--- STARTING JEWEL HUNTER INDEXING ---")
+    print(f"--- STARTING WATERFALL LSJ INDEXING ---")
     if not LSJ_DIR.exists():
         return
 
@@ -344,7 +334,11 @@ def build_index():
                 raw_def = extract_definition_flow(entry, converter)
                 final_def = clean_definition(raw_def)
                 aorist_form = extract_aorist(entry, converter)
-                cit_candidates = extract_citation_candidates(entry, converter)
+
+                # PASS THE DEFINITION AS FALLBACK
+                cit_candidates = extract_citation_candidates(
+                    entry, converter, final_def
+                )
 
                 if not final_def and not aorist_form and not cit_candidates:
                     continue
@@ -371,11 +365,8 @@ def build_index():
                             existing["aor"] = aorist_form
 
                     existing["cits_list"].extend(cit_candidates)
-                    unique_cits = {
-                        c["quote"]: c for c in existing["cits_list"]
-                    }.values()
-                    existing["cits_list"] = sorted(
-                        list(unique_cits), key=lambda x: x["score"], reverse=True
+                    existing["cits_list"].sort(
+                        key=lambda x: (x["tier"], not x["has_trans"], -x["length"])
                     )
 
                     if key not in existing["original_key"]:
@@ -386,7 +377,6 @@ def build_index():
         except Exception as e:
             logger.error(f"Error parsing {xml_file.name}: {e}")
 
-    # FORMAT FOR OUTPUT
     print("Curating Gallery...")
     for k, v in lsj_index.items():
         candidates = v.pop("cits_list", [])
@@ -395,13 +385,24 @@ def build_index():
             continue
 
         gallery = []
-        for cand in candidates[:3]:
+        seen_authors = set()
+
+        for cand in candidates:
+            if len(gallery) >= 3:
+                break
+
             full_bibl = expand_author(cand["author"])
+            main_author = full_bibl.split()[0] if full_bibl else "Unknown"
+
+            if main_author in seen_authors and len(candidates) > 3:
+                continue
+
             formatted = f"{cand['quote']}"
             if cand["trans"]:
                 formatted += f" '{cand['trans']}'"
             formatted += f" ({full_bibl})"
             gallery.append(formatted)
+            seen_authors.add(main_author)
 
         v["cit"] = " | ".join(gallery)
 
@@ -409,24 +410,6 @@ def build_index():
         json.dump(lsj_index, f, ensure_ascii=False, indent=2)
 
     logger.info(f"Saved to {OUTPUT_INDEX}")
-
-
-def extract_definition_flow(entry, converter):
-    def_parts = []
-    for sense in entry.findall(".//sense"):
-        for child in sense:
-            if child.tag == "tr" and child.text:
-                def_parts.append(child.text.strip().strip(",;"))
-            elif child.tag == "foreign" and child.text:
-                beta = child.text
-                greek = converter.to_greek(beta)
-                if len(greek.split()) < 4:
-                    def_parts.append(greek)
-            if child.tag == "bibl" or child.tag == "cit":
-                break
-        if def_parts:
-            break
-    return "; ".join(def_parts)
 
 
 if __name__ == "__main__":

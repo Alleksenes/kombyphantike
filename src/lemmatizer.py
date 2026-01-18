@@ -1,4 +1,7 @@
-import logging, spacy, stanza, warnings
+import logging
+import spacy
+import stanza
+import warnings
 
 # Suppress Stanza/Torch warnings
 warnings.filterwarnings("ignore")
@@ -20,7 +23,6 @@ class AncientLemmatizer:
         if self.use_stanza:
             try:
                 logger.info("Loading Stanza (grc)...")
-                # We only need tokenization and lemmatization
                 self.stanza_pipe = stanza.Pipeline(
                     "grc", processors="tokenize,pos,lemma", verbose=False, use_gpu=False
                 )
@@ -31,7 +33,6 @@ class AncientLemmatizer:
         if self.use_odycy:
             try:
                 logger.info("Loading OdyCy (grc_odycy_joint_sm)...")
-                # Ensure the wheel is installed via poetry
                 self.odycy_nlp = spacy.load("grc_odycy_joint_sm")
             except Exception as e:
                 logger.error(f"OdyCy init failed: {e}. Ensure the .whl is installed.")
@@ -49,7 +50,6 @@ class AncientLemmatizer:
             try:
                 doc = self.stanza_pipe(word)
                 if doc.sentences:
-                    # Return the lemma of the first word
                     lemma = doc.sentences[0].words[0].lemma
                     if lemma:
                         return lemma
@@ -67,5 +67,63 @@ class AncientLemmatizer:
             except:
                 pass
 
-        # Fallback: Return original word if all fail
         return word
+
+    def deconstruct_compound(self, word):
+        """
+        Attempts to strip common prefixes to find a valid root.
+        Used by Enrichment to find 'βαίνω' inside 'προβαίνω'.
+        """
+        candidates = []
+
+        prefixes = [
+            "α",
+            "αν",
+            "εκ",
+            "εξ",
+            "συν",
+            "συμ",
+            "προ",
+            "κατα",
+            "δια",
+            "περι",
+            "υπο",
+            "υπερ",
+            "αντι",
+            "απο",
+            "εισ",
+            "εν",
+            "επι",
+            "μετα",
+            "παρα",
+        ]
+
+        # Sort by length (longest first)
+        prefixes.sort(key=len, reverse=True)
+
+        suffixes = [
+            ("ιάτικος", "ας"),  # χειμωνιάτικος -> χειμώνας
+            ("αία", "αίος"),  # ωραία -> ωραίος
+            ("ποιώ", "ς"),  # χρησιμοποιώ -> χρήσιμος
+            ("ποίηση", "ος"),
+            ("τητα", "ς"),
+            ("μενος", "ω"),
+            ("όμενος", "ομαι"),
+            ("ομενικός", "ομαι"),
+            ("μιση", "μίζω"),
+            ("ιστής", "ίζω"),
+            ("όμενο", "ομαι"),
+        ]
+
+        for suffix, replacement in suffixes:
+            if word.endswith(suffix):
+                stem = word[: -len(suffix)]
+                candidate = stem + replacement
+                candidates.append(candidate)
+
+        for p in prefixes:
+            if word.startswith(p) and len(word) > len(p) + 2:
+                stem = word[len(p) :]
+                candidates.append(stem)
+
+        return candidates

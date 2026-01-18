@@ -1,63 +1,129 @@
-import pandas as pd
-import random, json, glob, os
-from src.config import SESSIONS_DIR, DRILLS_FILE
+import json
+import random
+import os
+import logging
+from src.config import PROCESSED_DIR, DATA_DIR
+
+# CONFIGURATION
+SESSION_FILE = DATA_DIR / "current_session.json"
+PARADIGMS_FILE = PROCESSED_DIR / "paradigms.json"
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("Drill")
 
 
-class Driller:
+class PrecisionDriller:
     def __init__(self):
-        self.session_file = self.get_latest_session()
+        print("Initializing the Precision Driller...")
 
-        if not self.session_file:
-            print("No sessions found! Run 'src/shuffler.py' first.")
+        # 1. Load Session
+        if not SESSION_FILE.exists():
+            print(f"❌ No session found at {SESSION_FILE}")
+            print("Run 'src/kombyphantike.py' first to generate a curriculum.")
             exit()
 
-        print(f"Loading Session: {self.session_file.name}")
-
-        with open(self.session_file, "r", encoding="utf-8") as f:
+        with open(SESSION_FILE, "r", encoding="utf-8") as f:
             self.session = json.load(f)
 
-        self.drills_db = pd.read_csv(DRILLS_FILE, dtype=str)
-        session_lemmas = [w["Lemma"] for w in self.session["words"]]
-        self.active_drills = self.drills_db[
-            self.drills_db["Lemma"].isin(session_lemmas)
+        # Extract Lemmas from Session
+        self.session_lemmas = [w["Lemma"] for w in self.session["words"]]
+        print(f"Loaded Session: {self.session.get('theme', 'Unknown Theme')}")
+        print(f"Vocabulary: {len(self.session_lemmas)} words.")
+
+        # 2. Load Paradigms
+        if not PARADIGMS_FILE.exists():
+            print(f"❌ Paradigms not found. Run 'src/main.py' first.")
+            exit()
+
+        with open(PARADIGMS_FILE, "r", encoding="utf-8") as f:
+            self.all_paradigms = json.load(f)
+
+    def clean_tags(self, raw_tags):
+        """
+        Filters noise from Kaikki-EL tags to show only the grammar.
+        e.g. ['ρημα', 'ενεστωτας', 'α' ενικ'] -> "Ενεστώτας a' ενικ"
+        """
+        ignore = [
+            "el-κλίσ",
+            "inflection-template",
+            "source",
+            "header",
+            "declension",
+            "conjugation",
+            "table-tags",
+        ]
+        keep = []
+        for t in raw_tags:
+            if t in ignore:
+                continue
+            if "κλίση" in t:
+                continue
+            keep.append(t)
+        return " ".join(keep)
+
+    def get_challenge(self):
+        # Pick a random word from the session
+        lemma = random.choice(self.session_lemmas)
+
+        # Check if we have a paradigm for it
+        if lemma not in self.all_paradigms:
+            return None  # Skip (maybe an adverb or particle)
+
+        forms = self.all_paradigms[lemma]
+        if not forms:
+            return None
+
+        # Pick a random target form (that is NOT the lemma itself)
+        # Filter out romanizations
+        valid_forms = [
+            f
+            for f in forms
+            if "romanization" not in f.get("tags", []) and f.get("form") != lemma
         ]
 
-    def get_latest_session(self):
-        """Finds the most recently created JSON file in sessions dir."""
-        files = list(SESSIONS_DIR.glob("*-session.json"))
-        if not files:
+        if not valid_forms:
             return None
-        # Sort by creation time (latest last)
-        latest_file = max(files, key=os.path.getctime)
-        return latest_file
+
+        target = random.choice(valid_forms)
+
+        return {
+            "lemma": lemma,
+            "target_form": target["form"],
+            "tags": target.get("raw_tags", target.get("tags", [])),
+            "pos": (
+                "Verb"
+                if "ρημα" in str(target).lower() or "verb" in str(target).lower()
+                else "Word"
+            ),
+        }
 
     def start(self):
-        drills = self.active_drills.to_dict(orient="records")
-        if not drills:
-            print(
-                "No drills found for these words! (Maybe they are uninflected particles?)"
-            )
-            return
+        print("\n--- GYM OPEN: MORPHOLOGICAL MATRIX ---")
+        print("Mode: Precision Drilling")
+        print("Scope: Current Session Vocabulary Only")
+        print("Press 'q' to quit, 'Enter' to reveal.\n")
 
-        random.shuffle(drills)
+        count = 0
+        while True:
+            challenge = self.get_challenge()
+            if not challenge:
+                continue  # Retry if word has no forms
 
-        print(f"\n--- GYMNASIUM OPENED ({len(drills)} cards) ---")
-        print("Press ENTER to reveal answer. Press 'q' to quit.\n")
+            count += 1
+            lemma = challenge["lemma"]
+            tags_display = self.clean_tags(challenge["tags"])
 
-        for i, card in enumerate(drills):
-            print(f"Card {i+1}/{len(drills)}")
-            print(f"Word:  {card['Lemma']} ({card['POS']})")
-            print(f"Form:  {card['Drill_Type'].upper()}")
+            print(f"[{count}] HERO: {lemma}")
+            print(f"    TARGET: {tags_display}")
 
             cmd = input(">> ")
             if cmd.lower() == "q":
                 break
 
-            print(f"Answer: {card['Back']}")
-            print("-" * 30)
-            input("(Next...)")
+            print(f"    ANSWER: {challenge['target_form']}")
+            print("-" * 40)
 
 
 if __name__ == "__main__":
-    gym = Driller()
-    gym.start()
+    drill = PrecisionDriller()
+    drill.start()

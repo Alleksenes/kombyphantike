@@ -11,7 +11,11 @@ This document maps the anatomy of the engine. It details how raw data is transmu
 
 ### `src/lsj_fuzzy_indexer.py` (The Oracle Indexer)
 Parses 27 volumes of LSJ XMLs into a high-speed JSON lookup (`lsj_index.json`).
-*   **The Poetic Miner:** A scoring algorithm that extracts literary citations. It prioritizes "Golden Authors" (Sophokles, Homeros et alii.) over prose, and penalizes fragmentary or untranslated citations.
+*   **The Waterfall Logic:** A scoring algorithm for citations.
+    *   *Tier 1 (Gods):* Sophokles, Homeros, Aiskhylos (+60).
+    *   *Tier 2 (Philosophers):* Platon, Aristoteles (+30).
+    *   *Tier 3 (Historians):* Thukydides, Herodotos (+10).
+    *   *Bonus:* Presence of English Translation (+50).
 *   **Canonicalization:** Strips accents, breathings, and numbers from keys (`ἔχω` → `exw`) to ensure fuzzy matching across eras.
 *   **Homonym Merge:** Detects key collisions (e.g., `ωμός` vs. `ὦμος`) and merges their definitions rather than overwriting, preserving semantic breadth.
 *   **Sibling Scanning:** Parses complex XML structures to link Greek text (`<foreign>`) with its translation (`<tr>`) and author (`<bibl>`) even when separated by intermediate nodes.
@@ -29,11 +33,17 @@ Parses 27 volumes of LSJ XMLs into a high-speed JSON lookup (`lsj_index.json`).
 Executes the sequential build process: Ingestion → Enrichment → Analysis → Serialization.
 *   **The Logic:** It runs the ETL (Extract, Transform, Load) sequence. It calls the Ingestor, the Enricher, and the Judge in order, producing the master `kelly.csv` database.
 
-### `src/enrichment.py` (The Brain)
-Determines the Ancient Antecedent of a Modern word using Wiktionary (Kaikki) etymologies.
-*   **Tournament Strategy:** Extracts all potential Greek ancestors from the text. Validates them against the LSJ Oracle. Selects the candidate with the highest Levenshtein similarity to the modern lemma.
-*   **Mutation Engine:** If lookup fails, attempts to reconstruct the ancient form by reversing common phonetic shifts (e.g., `-ώνω` → `-οέω`) to find a match in the Oracle.
-*   **Hail Mary:** A final fallback that checks if the modern lemma exists unchanged in the Ancient corpus.
+### `src/ingestion_hybrid.py` (The Hybrid Ingestor)
+A multi-pass system that merges data from three sources:
+1.  **Hellenic Core (`kaikki-el`):** The source of truth for Morphology, Etymology, and Real Examples.
+2.  **English Gloss (`kaikki-en`):** The source for English definitions.
+3.  **Compound Miner:** Detects sub-entries (e.g., `προβαίνω` inside `βαίνω`) and promotes them to first-class citizens.
+
+### `src/enrichment_el.py` (The Brain)
+Determines the Ancient Antecedent.
+*   **Recursive Hunt:** Traces compound words back to their root (`χειμωνιάτικος` < `χειμώνας` < `χειμών`).
+*   **Heuristic Reconstruction:** Reverses common phonetic shifts (e.g., `-ώνω` → `-οέω`) to find matches in LSJ when direct lookup fails.
+*   **Blacklist:** Filters out meta-words like "Ancient" or "Hellenic" from being misidentified as roots.
 
 ### `src/enrichment_lsj.py` (The Bridge)
 *   **Function:** Connects the Modern word (from Enrichment) to the Ancient Definition (from the Oracle).
@@ -41,12 +51,12 @@ Determines the Ancient Antecedent of a Modern word using Wiktionary (Kaikki) ety
 
 ### `src/lemmatizer.py` (The Heavy Artillery)
 *   **Function:** A wrapper for `Stanza` and `OdyCy` (NLP models).
-*   **Usage:** Used by `enrichment.py` as a fallback. If Regex fails to extract a root (e.g., `πατέρα` is Accusative, but the dictionary needs Nominative `πατήρ`), it asks the AI model to lemmatize it.
+*   **Usage:** Used by `enrichment_el.py` as a fallback. If Regex fails to extract a root (e.g., `πατέρα` is Accusative, but the dictionary needs Nominative `πατήρ`), it asks the AI model to lemmatize it.
 
 ### `src/analysis.py` (The Judge)
-Detects Semantic Drift ("False Friends").
-*   **Logic:** Uses `SentenceTransformer` (MiniLM) to generate vector embeddings for both the Modern and Ancient definitions.
-*   **Metric:** Calculates Cosine Similarity. A low score triggers a "High Drift" warning (e.g., `συμφορά`: *Disaster* vs. *Collection*).
+Detects Semantic Drift.
+*   **Triangulation:** Uses `paraphrase-multilingual-mpnet-base-v2` to compare the "Semantic Cloud" of Ancient meanings against Modern meanings.
+*   **Metrics:** Calculates both *Centroid Distance* (General Drift) and *Max Overlap* (Survival of specific senses).
 
 ### `src/config.py` (The Map)
 *   **Function:** Central configuration file defining all file paths (`data/raw`, `data/processed`, `data/dictionaries`). Ensures consistency across modules.
@@ -58,10 +68,10 @@ Detects Semantic Drift ("False Friends").
 
 ### `src/kombyphantike.py` (The Weaver)
 Generates a targeted worksheet based on a user-provided Theme.
-*   **Selection Algorithm:** Curates a "Phalanx" of ~50 words using a weighted formula:
-    *   `Theme Relevance` (Semantic Search) + `Ancient Heritage` (Etymology) + `Frequency`.
+*   **Curator:** Selects words based on a weighted formula: `Theme Relevance (Semantic Search)` (60%) + `Ancient Heritage (Etymology)` (30%) + `Frequency` (10%).
 *   **Knot Logic:** Selects Grammar Rules (`knots.csv`) that specifically govern the selected words (e.g., matching a Noun Knot to Nouns).
 *   **Prompt Engineering:** Generates a strict instruction set for an LLM, demanding sentences that obey the Grammar Knot while explicitly citing the Ancient Context.
+*   **Context Injection:** Now pulls `Modern_Examples` (real sentences from Kaikki) into the worksheet to ground the AI's generation in actual usage.
 
 ### `src/knot_loader.py` (The Librarian)
 Parses the `knots.csv` database. Converts human-readable rules (Regex endings, POS tags, Morphological constraints) into filter logic used by the Weaver.
@@ -74,6 +84,7 @@ Parses the `knots.csv` database. Converts human-readable rules (Regex endings, P
 *   **Push:** Validates the local CSV worksheet and uploads completed rows to the "SENTENCES" tab of the Master Google Sheet.
 *   **Pull:** Downloads the full study history to rebuild the local `user_progress.json`.
 *   **Fatigue System:** Tracks word usage frequency. The Weaver uses this data to deprioritize "exhausted" words, forcing vocabulary rotation.
+*   **Safety:** Uses `QUOTE_ALL` CSV handling to prevent data corruption from commas.
 
 ### `src/drill_generator.py` (The Armory)
 Scans the Kaikki dictionary for inflection tables. Extracts high-value morphological forms (Aorist Stem, Genitive Singular) into `modern_drills.csv` for flashcard generation.
