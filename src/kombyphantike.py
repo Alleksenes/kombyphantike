@@ -269,7 +269,7 @@ class KombyphantikeEngine:
 
         return top_morpho + top_syntax
 
-    def generate_worksheet(self, theme, target_sentences):
+    def compile_curriculum(self, theme, target_sentences):
         SENTENCES_PER_KNOT = 4
         POOL_MULTIPLIER = 1.5
 
@@ -282,15 +282,13 @@ class KombyphantikeEngine:
         words_df = self.select_words(theme, target_word_count)
         selected_knots = self.select_strategic_knots(words_df, target_knot_count)
 
-        # Save Session
+        # Build Session Data
         session_data = {
             "date": datetime.now().strftime("%Y-%m-%d"),
             "theme": theme,
             "words": words_df.to_dict(orient="records"),
             "knots": [k.to_dict() for k in selected_knots],
         }
-        with open(SESSION_FILE, "w", encoding="utf-8") as f:
-            json.dump(session_data, f, ensure_ascii=False, indent=2)
 
         rows = []
         print(f"--- WEAVING CURRICULUM ---")
@@ -365,6 +363,24 @@ class KombyphantikeEngine:
                 }
                 rows.append(row)
 
+        instruction_text = self.generate_ai_instruction(theme, target_sentences, words_df)
+
+        return {
+            "worksheet_data": rows,
+            "instruction_text": instruction_text,
+            "session_data": session_data
+        }
+
+    def generate_worksheet(self, theme, target_sentences):
+        result = self.compile_curriculum(theme, target_sentences)
+        rows = result["worksheet_data"]
+        instruction_text = result["instruction_text"]
+        session_data = result["session_data"]
+
+        # Save Session
+        with open(SESSION_FILE, "w", encoding="utf-8") as f:
+            json.dump(session_data, f, ensure_ascii=False, indent=2)
+
         df = pd.DataFrame(rows)
         cols = [
             "Source Sentence",
@@ -387,7 +403,9 @@ class KombyphantikeEngine:
         df.to_csv(WORKSHEET_OUTPUT, index=False, encoding="utf-8-sig")
 
         self.save_progress()
-        self.generate_ai_instruction(theme, target_sentences, words_df)
+
+        with open(PROMPT_INSTRUCTION_FILE, "w", encoding="utf-8") as f:
+            f.write(instruction_text)
         print(f"Worksheet generated: {WORKSHEET_OUTPUT}")
 
     def generate_ai_instruction(self, theme, count, words_df):
@@ -434,8 +452,7 @@ You have access to this curated vocabulary. **Use these words to fill the blank 
 
 **OUTPUT:** Provide the full CSV code block.
 """
-        with open(PROMPT_INSTRUCTION_FILE, "w", encoding="utf-8") as f:
-            f.write(text)
+        return text
 
 
 if __name__ == "__main__":
