@@ -23,6 +23,9 @@ RUN pip install poetry \
 # Copy dependency files
 COPY pyproject.toml poetry.lock* ./
 
+# Copy local wheel if it exists (using wildcards effectively makes this optional if files match)
+COPY *.whl ./
+
 # Install Dependencies
 # Note: We use --no-root to avoid installing the package itself at this stage
 # ensuring we can cache dependencies layer.
@@ -30,8 +33,6 @@ RUN poetry install --no-dev --no-interaction --no-ansi --no-root
 
 # Download Spacy Models
 RUN python -m spacy download en_core_web_md
-# Note: el_core_news_lg is not a standard Spacy model name (it's usually el_core_news_lg for Greek).
-# Checking if it exists, if not falling back to sm or md might be safer, but fulfilling request.
 RUN python -m spacy download el_core_news_lg
 
 # Copy Source Code and Data
