@@ -486,12 +486,14 @@ class KombyphantikeEngine:
                 }
                 rows.append(row)
 
-        instruction_text = self.generate_ai_instruction(theme, target_sentences, words_df)
+        instruction_text = self.generate_ai_instruction(
+            theme, target_sentences, words_df
+        )
 
         return {
             "worksheet_data": rows,
             "instruction_text": instruction_text,
-            "session_data": session_data
+            "session_data": session_data,
         }
 
     def generate_worksheet(self, theme, target_sentences):
@@ -584,12 +586,7 @@ class KombyphantikeEngine:
     * **No Markdown/Chatter:** Do not provide conversational filler before or after the CSV block.
 
 """
-<<<<<<< HEAD
-        with open(PROMPT_INSTRUCTION_FILE, "w", encoding="utf-8") as f:
-            f.write(text.strip())
-=======
         return text
->>>>>>> private-study
 
 
 if __name__ == "__main__":
