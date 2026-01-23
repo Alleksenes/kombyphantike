@@ -31,6 +31,7 @@ data/ai_instruction.txt
 
 # Poetry
 poetry.lock
+models/
 
 # Keys
 kombyphantike-google-key.json

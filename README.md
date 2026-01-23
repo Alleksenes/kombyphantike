@@ -69,6 +69,23 @@ poetry run python -m src.drill_generator
 
 ---
 
+## 🐳 Docker Deployment
+
+To deploy the Kombyphantike API using Docker:
+
+### 1. Build the Image
+```bash
+docker build -t kombyphantike-api .
+```
+
+### 2. Run the Container
+```bash
+docker run -p 8000:8000 kombyphantike-api
+```
+The API will be available at `http://localhost:8000`. You can access the automatic documentation at `http://localhost:8000/docs`.
+
+---
+
 ## ⚔️ The Study Mode - Kombyphantike Batch (Manual Mode)
 
 If you prefer the command line or manual AI prompting:
