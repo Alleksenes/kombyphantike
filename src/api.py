@@ -1,71 +1,140 @@
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from src.kombyphantike import KombyphantikeEngine
 import logging
+from pathlib import Path
 import os
 import json
-import google.generativeai as genai
+from dotenv import load_dotenv
 
-# Initialize Logging
+# --- NEW SDK IMPORT ---
+from google import genai
+from google.genai import types
+
+# 1. Setup Logging FIRST
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("api")
+logger = logging.getLogger("kombyphantike-api")
 
 app = FastAPI(title="Kombyphantike API", version="0.1.0")
 
-# Initialize Engine (Singleton)
-try:
-    engine = KombyphantikeEngine()
-except Exception as e:
-    logger.error(f"Failed to initialize engine: {e}")
-    # In a real scenario, we might want to crash here,
-    # but for resilience we'll keep the app alive and return 500s.
-    engine = None
+# --- CORS CONFIGURATION ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 2. Define Global Engine
+engine = None
+
+
+@app.on_event("startup")
+async def startup_event():
+    global engine
+    logger.info(">>> STARTUP SEQUENCE INITIATED <<<")
+
+    # 3. BULLETPROOF ENV LOADING
+    current_file = Path(__file__).resolve()
+    project_root = current_file.parent.parent
+    env_path = project_root / ".env"
+
+    logger.info(f"--- DEBUG: Looking for .env at: {env_path}")
+
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path)
+        logger.info("--- DEBUG: .env file found and loaded.")
+    else:
+        logger.error(f"--- DEBUG: .env file NOT found at {env_path}")
+
+    # 4. Check Key
+    key_check = os.getenv("GOOGLE_API_KEY")
+    if key_check:
+        masked_key = key_check[:4] + "..." + key_check[-4:]
+        logger.info(f"--- DEBUG: Key loaded successfully: {masked_key}")
+    else:
+        logger.error("--- DEBUG: Key variable is EMPTY after loading.")
+
+    # 5. Initialize Engine
+    try:
+        engine = KombyphantikeEngine()
+        logger.info("--- ENGINE: Initialized successfully.")
+    except Exception as e:
+        logger.error(f"--- ENGINE: Initialization failed: {e}")
+
 
 class WorksheetRequest(BaseModel):
     theme: str
     count: int
     complete_with_ai: bool = False
 
+
 def generate_with_gemini(prompt_text: str):
     """
-    Generates content using Google Gemini model.
+    Generates content using the new Google GenAI SDK (v1.0+).
     """
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        logger.error("GOOGLE_API_KEY not found in environment variables.")
-        raise HTTPException(status_code=500, detail="Google API Key configuration missing")
+        logger.error("CRITICAL: GOOGLE_API_KEY missing.")
+        raise HTTPException(
+            status_code=500, detail="Google API Key configuration missing"
+        )
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-3.0-flash')
+        # Initialize the new Client
+        client = genai.Client(api_key=api_key)
 
-        strict_instruction = "\nOutput the result strictly as a JSON list of objects, where each object represents a row in the worksheet."
+        strict_instruction = "\nOutput the result strictly as a JSON list of objects, where each object represents a row in the worksheet. Do not include markdown code blocks, just raw JSON."
         full_prompt = prompt_text + strict_instruction
 
-        response = model.generate_content(full_prompt)
-        # response.text might raise if the response was blocked, but usually it returns text.
+        # Call the new API
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",  # The Bleeding Edge
+            contents=full_prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                safety_settings=[
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"
+                    ),
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"
+                    ),
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        threshold="BLOCK_NONE",
+                    ),
+                    types.SafetySetting(
+                        category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                        threshold="BLOCK_NONE",
+                    ),
+                ],
+            ),
+        )
+
+        # Handle Response
+        if not response.text:
+            raise ValueError("AI returned empty response text.")
+
         text_response = response.text
 
-        # Parse JSON
+        # Clean JSON markdown
         clean_text = text_response.strip()
-        # Remove markdown code blocks if present
         if clean_text.startswith("```json"):
             clean_text = clean_text[7:]
         elif clean_text.startswith("```"):
             clean_text = clean_text[3:]
-
         if clean_text.endswith("```"):
             clean_text = clean_text[:-3]
 
-        clean_text = clean_text.strip()
-
-        return json.loads(clean_text)
+        return json.loads(clean_text.strip())
 
     except Exception as e:
         logger.error(f"Gemini generation failed: {e}")
-        # We might want to return partial result or fail?
-        # User requirement implies we must return the completed worksheet.
         raise HTTPException(status_code=500, detail=f"AI Generation failed: {str(e)}")
+
 
 @app.post("/generate_worksheet")
 def generate_worksheet_endpoint(request: WorksheetRequest):
@@ -73,34 +142,30 @@ def generate_worksheet_endpoint(request: WorksheetRequest):
         raise HTTPException(status_code=500, detail="Engine not initialized")
 
     try:
-        # Call the core logic
+        logger.info(f"Received request: {request.theme}")
         result = engine.compile_curriculum(request.theme, request.count)
 
         if request.complete_with_ai:
-            # Append the data to the prompt so AI knows what to complete
+            logger.info("AI Completion requested...")
             rows_json = json.dumps(result["worksheet_data"], indent=2)
-            prompt = result["instruction_text"] + "\n\n### DATA TO COMPLETE ###\n" + rows_json
+            prompt = (
+                result["instruction_text"]
+                + "\n\n### DATA TO COMPLETE ###\n"
+                + rows_json
+            )
 
             filled_rows = generate_with_gemini(prompt)
 
-            # Merge logic: Assuming AI returns the list of rows
             if isinstance(filled_rows, list):
                 result["worksheet_data"] = filled_rows
             else:
-                logger.warning("AI response was not a list, returning original data.")
-                # Alternatively raise error, but let's be safe and return original.
+                logger.warning("AI response was not a list.")
 
-        # Persist progress (learning)
         engine.save_progress()
-
         return {
             "worksheet": result["worksheet_data"],
-            "instructions": result["instruction_text"]
+            "instructions": result["instruction_text"],
         }
     except Exception as e:
-        logger.error(f"Error generating worksheet: {e}")
+        logger.error(f"Error in endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/health")
-def health_check():
-    return {"status": "ok", "engine_ready": engine is not None}
