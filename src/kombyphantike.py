@@ -82,8 +82,10 @@ class KombyphantikeEngine:
         ).fillna(0)
 
         self.use_transformer = False
+        self.vectors = None
         try:
             from sentence_transformers import SentenceTransformer, util
+            import pickle
 
             print("Loading Neural Semantic Model...")
             # If you want to use local:
@@ -91,6 +93,12 @@ class KombyphantikeEngine:
             # If you want to use cache (which you downloaded via git lfs):
             self.model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
             self.use_transformer = True
+
+            VECTORS_PATH = PROCESSED_DIR / "vectors.pkl"
+            if VECTORS_PATH.exists():
+                print("Loading pre-computed vectors...")
+                with open(VECTORS_PATH, "rb") as f:
+                    self.vectors = pickle.load(f)
         except Exception as e:
             print(f"SentenceTransformer not found: {e}")
             try:
@@ -139,23 +147,39 @@ class KombyphantikeEngine:
         candidates = self.kelly.copy()
 
         if self.use_transformer:
+            from sentence_transformers import util
+
             # Prioritize Greek Def, fallback to English
             candidates["Target_Def"] = candidates["Greek_Def"].fillna(
                 candidates["Modern_Def"]
             )
-            candidates = candidates[
-                candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
-            ]
-            definitions = candidates["Target_Def"].tolist()
-
-            from sentence_transformers import util
 
             theme_emb = self.model.encode(theme, convert_to_tensor=True)
-            corpus_emb = self.model.encode(
-                definitions, convert_to_tensor=True, show_progress_bar=True
-            )
-            scores = util.cos_sim(theme_emb, corpus_emb)[0].cpu().numpy()
-            candidates["Semantic_Score"] = scores
+
+            if self.vectors is not None:
+                # Use pre-computed vectors (aligned with self.kelly)
+                # Compute scores for ALL rows
+                all_scores = util.cos_sim(theme_emb, self.vectors)[0].cpu().numpy()
+
+                # Assign to candidates (which is a copy of self.kelly)
+                # Since candidates is a direct copy, indices and order match self.vectors
+                candidates["Semantic_Score"] = all_scores
+
+                # Filter candidates after scoring
+                candidates = candidates[
+                    candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
+                ]
+            else:
+                candidates = candidates[
+                    candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
+                ]
+                definitions = candidates["Target_Def"].tolist()
+
+                corpus_emb = self.model.encode(
+                    definitions, convert_to_tensor=True, show_progress_bar=True
+                )
+                scores = util.cos_sim(theme_emb, corpus_emb)[0].cpu().numpy()
+                candidates["Semantic_Score"] = scores
         else:
             theme_doc = self.nlp(theme)
 
