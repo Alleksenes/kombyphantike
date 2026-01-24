@@ -39,6 +39,9 @@ RUN python -m spacy download el_core_news_lg
 COPY src/ ./src/
 COPY data/ ./data/
 
+# Pre-compute vectors
+RUN python -m src.precompute_vectors
+
 # Expose the port
 EXPOSE 8000
 
