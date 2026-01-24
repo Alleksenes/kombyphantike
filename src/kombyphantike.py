@@ -605,9 +605,21 @@ class KombyphantikeEngine:
     * **Vocab Logging:** You MUST populate the `Core Vocab (Verb)` and `Core Vocab (Adjective)` columns with the exact words you used from the pool.
 
 4.  **PROTOCOL: OUTPUT FORMAT**
-    * Return **ONLY** the raw CSV code block.
-    * **Quote All Cells:** `"Sentence","Translation","Knot [Note]","Verb","Adj",...`
-    * **No Markdown/Chatter:** Do not provide conversational filler before or after the CSV block.
+    * Return **ONLY** a valid JSON list of objects.
+    * Each object must have the following keys:
+      - "Source Sentence" (The English sentence)
+      - "Greek Translation / Target Sentence" (The Modern Greek translation)
+      - "Knot ID" (Keep original)
+      - "Parent Concept" (Keep original)
+      - "The Specific Sub-Condition / Nuance" (Append your grammatical note here)
+      - "Core Vocab (Verb)" (Keep or Update)
+      - "Core Vocab (Adjective)" (Keep or Update)
+      - "Optional Core Vocab (Praepositio)"
+      - "Optional Core Vocab (Adverb)"
+      - "Ancient Context" (Keep original)
+      - "Modern Context" (Keep original)
+      - "Theme" (Keep original)
+    * **No Markdown/Chatter:** Do not provide conversational filler before or after the JSON block.
 
 """
         return text

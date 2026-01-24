@@ -4,7 +4,7 @@
 - [x] **Hellenic Ingestion:** Merging English/Greek Wiktionary.
 - [x] **LSJ Oracle:** Waterfall citation logic.
 - [x] **API Exposure:** FastAPI + Docker.
-- [ ] **Performance Optimization:** Pre-computing Semantic Vectors (MPNet) to reduce startup/generation time. **(PRIORITY)**
+- [x] **Performance Optimization:** Pre-computing Semantic Vectors (MPNet) to reduce startup/generation time.
 - [ ] **Data Persistence:** Database migration (SQLite/Postgres) for user history (replacing JSON files).
 
 ## Phase 2: The Fluid Experience (Next)
