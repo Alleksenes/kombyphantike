@@ -143,13 +143,21 @@ def generate_worksheet_endpoint(request: WorksheetRequest):
 
     try:
         logger.info(f"Received request: {request.theme}")
-        result = engine.compile_curriculum(request.theme, request.count)
+
+        # Use new method to get clean data structure
+        result = engine.compile_curriculum_data(request.theme, request.count)
+        worksheet_data = result["worksheet_data"]
+
+        # Generate clean JSON-oriented instructions
+        instruction_text = engine.generate_ai_instruction(
+            request.theme, request.count, result["words_df"], output_format="json"
+        )
 
         if request.complete_with_ai:
             logger.info("AI Completion requested...")
-            rows_json = json.dumps(result["worksheet_data"], indent=2)
+            rows_json = json.dumps(worksheet_data, indent=2)
             prompt = (
-                result["instruction_text"]
+                instruction_text
                 + "\n\n### DATA TO COMPLETE ###\n"
                 + rows_json
             )
@@ -157,14 +165,14 @@ def generate_worksheet_endpoint(request: WorksheetRequest):
             filled_rows = generate_with_gemini(prompt)
 
             if isinstance(filled_rows, list):
-                result["worksheet_data"] = filled_rows
+                worksheet_data = filled_rows
             else:
                 logger.warning("AI response was not a list.")
 
         engine.save_progress()
         return {
-            "worksheet": result["worksheet_data"],
-            "instructions": result["instruction_text"],
+            "worksheet": worksheet_data,
+            "instructions": instruction_text,
         }
     except Exception as e:
         logger.error(f"Error in endpoint: {e}")

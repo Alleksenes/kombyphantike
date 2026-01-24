@@ -313,7 +313,11 @@ class KombyphantikeEngine:
 
         return top_morpho + top_syntax
 
-    def compile_curriculum(self, theme, target_sentences):
+    def compile_curriculum_data(self, theme, target_sentences):
+        """
+        Generates the raw curriculum data using standardized internal keys.
+        This separates the data logic from the presentation layer (CSV/JSON).
+        """
         SENTENCES_PER_KNOT = 4
         POOL_MULTIPLIER = 1.5
 
@@ -495,42 +499,82 @@ class KombyphantikeEngine:
                 core_adj = hero if knot["POS_Tag"] == "Adjective" else ""
 
                 row = {
-                    "Source Sentence": "",
-                    "Greek Translation / Target Sentence": "",
-                    "Knot ID": knot["Knot_ID"],
-                    "Parent Concept": knot["Parent_Concept"],
-                    "The Specific Sub-Condition / Nuance": knot["Nuance"],
-                    "Core Vocab (Verb)": core_v,
-                    "Core Vocab (Adjective)": core_adj,
-                    "Optional Core Vocab (Praepositio)": "",
-                    "Optional Core Vocab (Adverb)": "",
-                    "Ancient Context": ancient_ctx,
-                    "Modern Context": modern_ctx,
-                    "Theme": f"{theme} (Focus: {hero})",
+                    "source_sentence": "",
+                    "target_sentence": "",
+                    "knot_id": knot["Knot_ID"],
+                    "parent_concept": knot["Parent_Concept"],
+                    "nuance": knot["Nuance"],
+                    "core_verb": core_v,
+                    "core_adj": core_adj,
+                    "optional_praepositio": "",
+                    "optional_adverb": "",
+                    "ancient_context": ancient_ctx,
+                    "modern_context": modern_ctx,
+                    "theme": f"{theme} (Focus: {hero})",
                 }
                 rows.append(row)
 
+        return {
+            "worksheet_data": rows,
+            "session_data": session_data,
+            "words_df": words_df,
+        }
+
+    # Deprecated/Wrapper for backward compatibility if needed, but updated to use new data structure
+    def compile_curriculum(self, theme, target_sentences):
+        result = self.compile_curriculum_data(theme, target_sentences)
+
+        # We need to map the data back to legacy keys for the old API signature if it expects it,
+        # but since we are refactoring, we will update the usage.
+
+        # Generate instruction using default JSON mode
         instruction_text = self.generate_ai_instruction(
-            theme, target_sentences, words_df
+            theme, target_sentences, result["words_df"], output_format="json"
         )
 
         return {
-            "worksheet_data": rows,
+            "worksheet_data": result["worksheet_data"],
             "instruction_text": instruction_text,
-            "session_data": session_data,
+            "session_data": result["session_data"]
         }
 
-    def generate_worksheet(self, theme, target_sentences):
-        result = self.compile_curriculum(theme, target_sentences)
-        rows = result["worksheet_data"]
-        instruction_text = result["instruction_text"]
-        session_data = result["session_data"]
+    def _map_to_legacy_csv(self, rows):
+        """Maps internal dictionary keys to the verbose CSV headers."""
+        csv_rows = []
+        for r in rows:
+            csv_rows.append({
+                "Source Sentence": r.get("source_sentence", ""),
+                "Greek Translation / Target Sentence": r.get("target_sentence", ""),
+                "Knot ID": r.get("knot_id", ""),
+                "Parent Concept": r.get("parent_concept", ""),
+                "The Specific Sub-Condition / Nuance": r.get("nuance", ""),
+                "Core Vocab (Verb)": r.get("core_verb", ""),
+                "Core Vocab (Adjective)": r.get("core_adj", ""),
+                "Optional Core Vocab (Praepositio)": r.get("optional_praepositio", ""),
+                "Optional Core Vocab (Adverb)": r.get("optional_adverb", ""),
+                "Ancient Context": r.get("ancient_context", ""),
+                "Modern Context": r.get("modern_context", ""),
+                "Theme": r.get("theme", ""),
+            })
+        return csv_rows
 
+    def generate_worksheet(self, theme, target_sentences):
+        result = self.compile_curriculum_data(theme, target_sentences)
+
+        # Generate CSV-specific instruction
+        instruction_text = self.generate_ai_instruction(
+            theme, target_sentences, result["words_df"], output_format="csv"
+        )
+
+        session_data = result["session_data"]
         # Save Session
         with open(SESSION_FILE, "w", encoding="utf-8") as f:
             json.dump(session_data, f, ensure_ascii=False, indent=2)
 
-        df = pd.DataFrame(rows)
+        # Map to Legacy CSV format for saving
+        csv_rows = self._map_to_legacy_csv(result["worksheet_data"])
+
+        df = pd.DataFrame(csv_rows)
         cols = [
             "Source Sentence",
             "Greek Translation / Target Sentence",
@@ -560,7 +604,7 @@ class KombyphantikeEngine:
             f.write(instruction_text)
         print(f"Worksheet generated: {WORKSHEET_OUTPUT}")
 
-    def generate_ai_instruction(self, theme, count, words_df):
+    def generate_ai_instruction(self, theme, count, words_df, output_format="json"):
         pool_text = []
         for pos, group in words_df.groupby(self.pos_col):
             lemmas = ", ".join(group["Lemma"].tolist())
@@ -574,55 +618,80 @@ class KombyphantikeEngine:
             pool_text.append(f"**{clean_pos}**: {lemmas}")
         pool_string = "\n".join(pool_text)
 
-        text = f"""
+        base_text = f"""
 ### SYSTEM DESIGNATION: DIGITAL HUMANITIES RESEARCH ASSOCIATE ###
 
 **ROLE:** You are the Research Assistant to the Lead Classical Philologist of Project Kombyphantike.
 **CONTEXT:** You are operating within a strict Python/Google Sheets data pipeline. The user (Lead Philologist) has established a scalable learning tool that bridges Ancient and Modern Greek.
-**OPERATIONAL BOUNDARIES:** Your output will be parsed programmatically. Any alteration to the schema, headers, or existing data columns (citations/IDs) will cause a pipeline failure.
+**OPERATIONAL BOUNDARIES:** Your output will be parsed programmatically.
 
 **THEME:** **{theme}**
-**TASK:** Interpolate missing data for the attached CSV worksheet ({count} rows).
+**TASK:** Interpolate missing data for the attached data ({count} items).
 
 ### THE RESOURCE POOL (SEMANTIC INGREDIENTS)
 **Instruction:** You must draw from this pool to construct natural, high-register sentences. Do not force "garbage" sentences; use these words to create meaningful scenarios relevant to the Theme.
 {pool_string}
 
 ### EXECUTION PROTOCOL (STRICT COMPLIANCE)
+"""
 
+        if output_format == "json":
+            protocol_text = """
 1.  **PROTOCOL: DATA IMMUTABILITY (CRITICAL)**
-    * **READ-ONLY ZONES:** You are strictly FORBIDDEN from modifying, deleting, or summarizing the following columns: `Knot ID`, `Parent Concept`, `The Specific Sub-Condition / Nuance`, `Ancient Context`, `Modern Context`.
-    * **PRESERVATION:** You must echo these columns back *exactly* as they appear in the input, ensuring all citations and ancient/modern source texts remain 100% intact.
+    * **READ-ONLY ZONES:** You are strictly FORBIDDEN from modifying, deleting, or summarizing the following keys: `knot_id`, `parent_concept`, `ancient_context`, `modern_context`.
+    * **PRESERVATION:** You must echo these keys back *exactly* as they appear in the input.
 
 2.  **PROTOCOL: THE LIVING BRIDGE (CONTENT GENERATION)**
-    * **The Hero Word:** Identify the hero word in the 'Theme' column.
-    * **The Syntax:** Construct a Modern Greek sentence (`Greek Translation`) that strictly follows the morphological rule in the `Knot ID` column.
-    * **The Semantics:** The sentence should be colloquial yet educated—the voice of a philologist living in the modern world.
-    * **Resource Integration:** You MUST incorporate at least **2 additional words** from the Resource Pool into the sentence to ensure lexical richness.
+    * **The Hero Word:** Identify the hero word in the 'theme' key.
+    * **The Syntax:** Construct a Modern Greek sentence (`target_sentence`) that strictly follows the morphological rule in the `knot_id` key.
+    * **The Semantics:** The sentence should be colloquial yet educated.
+    * **Resource Integration:** You MUST incorporate at least **2 additional words** from the Resource Pool into the sentence.
 
 3.  **PROTOCOL: ANNOTATION**
-    * **The Knot Note:** In the `The Specific Sub-Condition / Nuance` column, RETAIN the original text and APPEND a note in brackets explaining your grammatical decision: `... [APPLIED: Genitive Plural 'ασκήσεων' for stress shift]`.
-    * **Vocab Logging:** You MUST populate the `Core Vocab (Verb)` and `Core Vocab (Adjective)` columns with the exact words you used from the pool.
+    * **The Knot Note:** In the `nuance` key, RETAIN the original text and APPEND a note in brackets: `... [APPLIED: Genitive Plural for stress shift]`.
+    * **Vocab Logging:** You MUST populate `core_verb` and `core_adj` with the exact words you used from the pool.
 
 4.  **PROTOCOL: OUTPUT FORMAT**
     * Return **ONLY** a valid JSON list of objects.
     * Each object must have the following keys:
-      - "Source Sentence" (The English sentence)
-      - "Greek Translation / Target Sentence" (The Modern Greek translation)
-      - "Knot ID" (Keep original)
-      - "Parent Concept" (Keep original)
-      - "The Specific Sub-Condition / Nuance" (Append your grammatical note here)
-      - "Core Vocab (Verb)" (Keep or Update)
-      - "Core Vocab (Adjective)" (Keep or Update)
-      - "Optional Core Vocab (Praepositio)"
-      - "Optional Core Vocab (Adverb)"
-      - "Ancient Context" (Keep original)
-      - "Modern Context" (Keep original)
-      - "Theme" (Keep original)
-    * **No Markdown/Chatter:** Do not provide conversational filler before or after the JSON block.
-
+      - "source_sentence" (The English sentence)
+      - "target_sentence" (The Modern Greek translation)
+      - "knot_id" (Keep original)
+      - "parent_concept" (Keep original)
+      - "nuance" (Append your grammatical note here)
+      - "core_verb" (Keep or Update)
+      - "core_adj" (Keep or Update)
+      - "optional_praepositio"
+      - "optional_adverb"
+      - "ancient_context" (Keep original)
+      - "modern_context" (Keep original)
+      - "theme" (Keep original)
+    * **No Markdown/Chatter:** Do not provide conversational filler. Do not use markdown code blocks (```json). Just raw JSON.
 """
-        return text
+        else:
+            # Legacy CSV Prompt
+            protocol_text = """
+1.  **PROTOCOL: DATA IMMUTABILITY (CRITICAL)**
+    * **READ-ONLY ZONES:** You are strictly FORBIDDEN from modifying, deleting, or summarizing the following columns: `Knot ID`, `Parent Concept`, `The Specific Sub-Condition / Nuance`, `Ancient Context`, `Modern Context`.
+    * **PRESERVATION:** You must echo these columns back *exactly* as they appear.
+
+2.  **PROTOCOL: THE LIVING BRIDGE (CONTENT GENERATION)**
+    * **The Hero Word:** Identify the hero word in the 'Theme' column.
+    * **The Syntax:** Construct a Modern Greek sentence (`Greek Translation`) that strictly follows the morphological rule in the `Knot ID` column.
+    * **The Semantics:** The sentence should be colloquial yet educated.
+    * **Resource Integration:** You MUST incorporate at least **2 additional words** from the Resource Pool into the sentence.
+
+3.  **PROTOCOL: ANNOTATION**
+    * **The Knot Note:** In the `The Specific Sub-Condition / Nuance` column, RETAIN the original text and APPEND a note in brackets explaining your grammatical decision.
+    * **Vocab Logging:** You MUST populate the `Core Vocab (Verb)` and `Core Vocab (Adjective)` columns.
+
+4.  **PROTOCOL: OUTPUT FORMAT**
+    * Return **ONLY** the raw CSV code block.
+    * **Quote All Cells:** `"Sentence","Translation","Knot [Note]","Verb","Adj",...`
+    * **No Markdown/Chatter:** Do not provide conversational filler before or after the CSV block.
+"""
+
+        return base_text + protocol_text
 
 
 if __name__ == "__main__":
