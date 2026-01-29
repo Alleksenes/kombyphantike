@@ -7,92 +7,71 @@ from pathlib import Path
 import os
 import json
 from dotenv import load_dotenv
-
-# --- NEW SDK IMPORT ---
 from google import genai
 from google.genai import types
 
-# 1. Setup Logging FIRST
+# 1. Logging & Config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("kombyphantike-api")
 
-app = FastAPI(title="Kombyphantike API", version="0.1.0")
+app = FastAPI(title="Kombyphantike API", version="0.2.0")
 
-# --- CORS CONFIGURATION ---
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Secure this for production later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 2. Define Global Engine
+# 2. Engine Lifecycle
 engine = None
 
 
 @app.on_event("startup")
 async def startup_event():
     global engine
-    logger.info(">>> STARTUP SEQUENCE INITIATED <<<")
+    logger.info(">>> STARTUP SEQUENCE <<<")
 
-    # 3. BULLETPROOF ENV LOADING
+    # Load Env
     current_file = Path(__file__).resolve()
     project_root = current_file.parent.parent
     env_path = project_root / ".env"
-
-    logger.info(f"--- DEBUG: Looking for .env at: {env_path}")
-
     if env_path.exists():
         load_dotenv(dotenv_path=env_path)
-        logger.info("--- DEBUG: .env file found and loaded.")
-    else:
-        logger.error(f"--- DEBUG: .env file NOT found at {env_path}")
 
-    # 4. Check Key
-    key_check = os.getenv("GOOGLE_API_KEY")
-    if key_check:
-        masked_key = key_check[:4] + "..." + key_check[-4:]
-        logger.info(f"--- DEBUG: Key loaded successfully: {masked_key}")
-    else:
-        logger.error("--- DEBUG: Key variable is EMPTY after loading.")
-
-    # 5. Initialize Engine
+    # Init Engine
     try:
         engine = KombyphantikeEngine()
-        logger.info("--- ENGINE: Initialized successfully.")
+        logger.info("--- ENGINE: Ready.")
     except Exception as e:
-        logger.error(f"--- ENGINE: Initialization failed: {e}")
+        logger.error(f"--- ENGINE ERROR: {e}")
 
 
-class WorksheetRequest(BaseModel):
+# 3. Data Models
+class DraftRequest(BaseModel):
     theme: str
     count: int
-    complete_with_ai: bool = False
 
 
-def generate_with_gemini(prompt_text: str):
-    """
-    Generates content using the new Google GenAI SDK (v1.0+).
-    """
+class FillRequest(BaseModel):
+    # The client sends back the draft data to be filled
+    worksheet_data: list
+    instruction_text: str
+
+
+# 4. Helper: Gemini
+def call_gemini(prompt_text: str):
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        logger.error("CRITICAL: GOOGLE_API_KEY missing.")
-        raise HTTPException(
-            status_code=500, detail="Google API Key configuration missing"
-        )
+        raise Exception("Google API Key missing")
 
     try:
-        # Initialize the new Client
         client = genai.Client(api_key=api_key)
-
-        strict_instruction = "\nOutput the result strictly as a JSON list of objects, where each object represents a row in the worksheet. Do not include markdown code blocks, just raw JSON."
-        full_prompt = prompt_text + strict_instruction
-
-        # Call the new API
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",  # The Bleeding Edge
-            contents=full_prompt,
+            model="gemini-2.5-flash",  # Stable model
+            contents=prompt_text,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 safety_settings=[
@@ -113,59 +92,74 @@ def generate_with_gemini(prompt_text: str):
                 ],
             ),
         )
-
-        # Handle Response
         if not response.text:
-            raise ValueError("AI returned empty response text.")
+            raise ValueError("Empty response from AI")
 
-        text_response = response.text
+        # Clean Markdown
+        clean = response.text.strip()
+        if clean.startswith("```json"):
+            clean = clean[7:]
+        if clean.startswith("```"):
+            clean = clean[3:]
+        if clean.endswith("```"):
+            clean = clean[:-3]
 
-        # Clean JSON markdown
-        clean_text = text_response.strip()
-        if clean_text.startswith("```json"):
-            clean_text = clean_text[7:]
-        elif clean_text.startswith("```"):
-            clean_text = clean_text[3:]
-        if clean_text.endswith("```"):
-            clean_text = clean_text[:-3]
-
-        return json.loads(clean_text.strip())
-
+        return json.loads(clean.strip())
     except Exception as e:
-        logger.error(f"Gemini generation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"AI Generation failed: {str(e)}")
+        logger.error(f"Gemini Error: {e}")
+        raise e
 
 
-@app.post("/generate_worksheet")
-def generate_worksheet_endpoint(request: WorksheetRequest):
+# 5. Endpoints
+
+
+@app.post("/draft_curriculum")
+def draft_curriculum(request: DraftRequest):
+    """
+    STEP 1: The Blueprint.
+    Fast. Selects words, knots, and context. No AI generation.
+    """
     if not engine:
-        raise HTTPException(status_code=500, detail="Engine not initialized")
+        raise HTTPException(500, "Engine not ready")
 
     try:
-        logger.info(f"Received request: {request.theme}")
+        logger.info(f"Drafting: {request.theme}")
+        # Call core logic WITHOUT AI
         result = engine.compile_curriculum(request.theme, request.count)
 
-        if request.complete_with_ai:
-            logger.info("AI Completion requested...")
-            rows_json = json.dumps(result["worksheet_data"], indent=2)
-            prompt = (
-                result["instruction_text"]
-                + "\n\n### DATA TO COMPLETE ###\n"
-                + rows_json
-            )
-
-            filled_rows = generate_with_gemini(prompt)
-
-            if isinstance(filled_rows, list):
-                result["worksheet_data"] = filled_rows
-            else:
-                logger.warning("AI response was not a list.")
-
-        engine.save_progress()
+        # Return the structure
         return {
-            "worksheet": result["worksheet_data"],
-            "instructions": result["instruction_text"],
+            "worksheet_data": result["worksheet_data"],
+            "instruction_text": result["instruction_text"],
         }
     except Exception as e:
-        logger.error(f"Error in endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Draft Error: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.post("/fill_curriculum")
+def fill_curriculum(request: FillRequest):
+    """
+    STEP 2: The Weave.
+    Slow. Takes the draft and asks AI to fill the sentences.
+    """
+    try:
+        logger.info("Filling curriculum with AI...")
+
+        # Construct the Prompt
+        rows_json = json.dumps(request.worksheet_data, indent=2)
+        full_prompt = (
+            request.instruction_text + "\n\n### DATA TO COMPLETE ###\n" + rows_json
+        )
+
+        # Call AI
+        filled_rows = call_gemini(full_prompt)
+
+        if isinstance(filled_rows, list):
+            return {"worksheet_data": filled_rows}
+        else:
+            raise ValueError("AI returned invalid structure")
+
+    except Exception as e:
+        logger.error(f"Fill Error: {e}")
+        raise HTTPException(500, str(e))
