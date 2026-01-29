@@ -156,6 +156,11 @@ def fill_curriculum(request: FillRequest):
         filled_rows = call_gemini(full_prompt)
 
         if isinstance(filled_rows, list):
+            # Tokenize Results
+            for row in filled_rows:
+                row["target_tokens"] = engine.tokenize_text(row.get("target_sentence", ""), "el")
+                row["source_tokens"] = engine.tokenize_text(row.get("source_sentence", ""), "en")
+
             return {"worksheet_data": filled_rows}
         else:
             raise ValueError("AI returned invalid structure")
