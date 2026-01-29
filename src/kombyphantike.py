@@ -81,6 +81,16 @@ class KombyphantikeEngine:
             self.kelly["Similarity_Score"], errors="coerce"
         ).fillna(0)
 
+        # Tokenizer Models
+        try:
+            print("Loading Spacy Models...")
+            self.nlp_el = spacy.load("el_core_news_lg")
+            self.nlp_en = spacy.load("en_core_web_md")
+        except Exception as e:
+            print(f"CRITICAL WARNING: Spacy models missing. Tokenization will fail. {e}")
+            self.nlp_el = None
+            self.nlp_en = None
+
         # Semantic Model Loading
         self.use_transformer = False
         self.vectors = None
@@ -99,10 +109,43 @@ class KombyphantikeEngine:
                     self.vectors = pickle.load(f)
         except Exception as e:
             print(f"SentenceTransformer not found or failed: {e}")
-            try:
-                self.nlp = spacy.load("en_core_web_md")
-            except:
-                print("Spacy missing. Semantic search will be degraded.")
+            if self.nlp_en:
+                self.nlp = self.nlp_en
+            else:
+                try:
+                    self.nlp = spacy.load("en_core_web_md")
+                except:
+                    print("Spacy missing. Semantic search will be degraded.")
+
+    def _tokenize(self, text: str, lang: str) -> list:
+        """
+        Helper: Tokenizes text into structured objects.
+        """
+        model = self.nlp_el if lang in ["el", "greek"] else self.nlp_en
+
+        if not model:
+            return []
+
+        doc = model(text)
+        tokens = []
+        for token in doc:
+            tokens.append({
+                "text": token.text,
+                "lemma": token.lemma_,
+                "pos": token.pos_,
+                "tag": token.tag_,
+                "dep": token.dep_,
+                "is_alpha": token.is_alpha
+            })
+        return tokens
+
+    def tokenize_text(self, text: str, lang: str) -> list:
+        """
+        Public wrapper for tokenization.
+        """
+        if not text:
+            return []
+        return self._tokenize(text, lang)
 
     def save_progress(self):
         with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
