@@ -157,6 +157,11 @@ def generate_worksheet_endpoint(request: WorksheetRequest):
             filled_rows = generate_with_gemini(prompt)
 
             if isinstance(filled_rows, list):
+                # Tokenize the generated sentences
+                for row in filled_rows:
+                    target_sentence = row.get("Greek Translation / Target Sentence", "")
+                    row["Target Tokens"] = engine._tokenize_sentence(target_sentence)
+
                 result["worksheet_data"] = filled_rows
             else:
                 logger.warning("AI response was not a list.")

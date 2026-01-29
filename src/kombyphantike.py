@@ -107,6 +107,33 @@ class KombyphantikeEngine:
                 print("Spacy missing.")
                 exit()
 
+        # Load Greek Model for Tokenization
+        try:
+            print("Loading Greek Spacy Model...")
+            self.nlp_el = spacy.load("el_core_news_lg")
+        except Exception as e:
+            print(f"Greek Spacy Model (el_core_news_lg) missing: {e}")
+            self.nlp_el = None
+
+    def _tokenize_sentence(self, text):
+        if not text or not isinstance(text, str) or not self.nlp_el:
+            return []
+
+        doc = self.nlp_el(text)
+        tokens = []
+        for token in doc:
+            token_data = {
+                "text": token.text,
+                "lemma": token.lemma_,
+                "pos": token.pos_,
+                "tag": token.tag_,
+                "is_alpha": token.is_alpha,
+            }
+            if token.lemma_ in self.paradigms:
+                token_data["has_paradigm"] = True
+            tokens.append(token_data)
+        return tokens
+
     def save_progress(self):
         with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
             json.dump(self.progress, f, ensure_ascii=False, indent=2)
@@ -507,6 +534,7 @@ class KombyphantikeEngine:
                     "Ancient Context": ancient_ctx,
                     "Modern Context": modern_ctx,
                     "Theme": f"{theme} (Focus: {hero})",
+                    "Target Tokens": [],
                 }
                 rows.append(row)
 
