@@ -2,6 +2,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from src.kombyphantike import KombyphantikeEngine
+import re
 import logging
 from pathlib import Path
 import os
@@ -97,6 +98,7 @@ def call_gemini(prompt_text: str):
 
         # Clean Markdown
         clean = response.text.strip()
+        # Remove Markdown
         if clean.startswith("```json"):
             clean = clean[7:]
         if clean.startswith("```"):
@@ -104,7 +106,22 @@ def call_gemini(prompt_text: str):
         if clean.endswith("```"):
             clean = clean[:-3]
 
-        return json.loads(clean.strip())
+        clean = clean.strip()
+
+        # SANITIZATION: Fix common JSON escape errors
+        # 1. Escape backslashes that aren't already escaped?
+        # Actually, let's try a library if standard fails, but regex is faster.
+        # This regex looks for a backslash that is NOT followed by a valid escape char.
+        # But this is risky.
+
+        try:
+            return json.loads(clean)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON Parse Error: {e}. Attempting repair...")
+            # Fallback: Use 'dirtyjson' or simple regex patch if installed?
+            # Let's try to just log the bad text for now to see what Gemini did.
+            logger.error(f"Bad JSON Content: {clean[:500]}...")  # Print first 500 chars
+            raise ValueError(f"AI returned invalid JSON: {e}")
     except Exception as e:
         logger.error(f"Gemini Error: {e}")
         raise e
@@ -141,25 +158,35 @@ def draft_curriculum(request: DraftRequest):
 def fill_curriculum(request: FillRequest):
     """
     STEP 2: The Weave.
-    Slow. Takes the draft and asks AI to fill the sentences.
     """
+    if not engine:
+        raise HTTPException(500, "Engine not ready")
+
     try:
         logger.info("Filling curriculum with AI...")
 
-        # Construct the Prompt
         rows_json = json.dumps(request.worksheet_data, indent=2)
         full_prompt = (
             request.instruction_text + "\n\n### DATA TO COMPLETE ###\n" + rows_json
         )
 
-        # Call AI
         filled_rows = call_gemini(full_prompt)
 
         if isinstance(filled_rows, list):
-            # Tokenize Results
+            # --- THE TOKENIZATION INJECTION ---
             for row in filled_rows:
-                row["target_tokens"] = engine.tokenize_text(row.get("target_sentence", ""), "el")
-                row["source_tokens"] = engine.tokenize_text(row.get("source_sentence", ""), "en")
+                # Tokenize Greek
+                greek_text = row.get("target_sentence") or row.get(
+                    "Greek Translation / Target Sentence"
+                )
+                if greek_text:
+                    row["target_tokens"] = engine.tokenize_text(greek_text, "el")
+
+                # Tokenize English (Optional)
+                eng_text = row.get("source_sentence") or row.get("Source Sentence")
+                if eng_text:
+                    row["source_tokens"] = engine.tokenize_text(eng_text, "en")
+            # ----------------------------------
 
             return {"worksheet_data": filled_rows}
         else:
