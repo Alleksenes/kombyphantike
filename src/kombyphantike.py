@@ -84,7 +84,9 @@ class KombyphantikeEngine:
             self.nlp_el = spacy.load("el_core_news_lg")
             self.nlp_en = spacy.load("en_core_web_md")
         except Exception as e:
-            print(f"CRITICAL WARNING: Spacy models missing. Tokenization will fail. {e}")
+            print(
+                f"CRITICAL WARNING: Spacy models missing. Tokenization will fail. {e}"
+            )
             self.nlp_el = None
             self.nlp_en = None
 
@@ -142,7 +144,7 @@ class KombyphantikeEngine:
                 "pos": token.pos_,
                 "tag": token.tag_,
                 "dep": token.dep_,
-                "is_alpha": token.is_alpha
+                "is_alpha": token.is_alpha,
             }
 
             paradigm = self.paradigms.get(token.lemma_)
@@ -556,32 +558,25 @@ class KombyphantikeEngine:
         pool_string = "\n".join(pool_text)
 
         text = f"""
-### MISSION PROFILE: PROJECT KOMBYPHANTIKE ###
+### SYSTEM OVERRIDE: KOMBYPHANTIKE MOBILE ENGINE ###
 
-**ROLE:** Diachronic Greek Philologist & Logic Weaver.
-**THEME:** **{theme}**
-**GOAL:** Complete the attached dataset ({count} rows).
+**ROLE:** You are the AI Engine for a high-level Greek Philology App.
+**TASK:** Populate the provided JSON Data Structure with sentences.
+**THEME:** {theme}
 
-### THE RESOURCE POOL (YOUR INGREDIENTS)
-**Use these words to fill the blank slots.**
+### THE RAW MATERIALS
+You must prioritize these words in your sentences:
 {pool_string}
 
-### EXECUTION PROTOCOL FOR EACH ROW
+### THE RULES OF ENGAGEMENT
+1. **The Format:** You will receive a list of JSON objects (The Blueprint). You must return the SAME list, but with the `target_sentence` (Modern Greek) and `source_sentence` (English) fields filled.
+2. **The Logic (The Knot):** Look at the `nuance` field in each row. The Greek sentence **MUST** demonstrate this specific grammar rule using the word in the `theme` field (The Hero Word).
+3. **The Tone:** 
+   *   **Sophisticated but Concise:** These will appear on a mobile screen. Avoid overly long sentences.
+   *   **Resonant:** Use the `ancient_context` field to inspire the meaning, but write modern, natural Greek.
+4. **The Output:** Return **ONLY RAW JSON**. No Markdown formatting (```json), no conversational filler. Just the array.
 
-1.  **IDENTIFY THE HERO:** Look at the 'theme' key (Focus: X).
-2.  **CHECK THE ANCIENT CONTEXT:**
-    *   'ancient_context' contains the citation.
-    *   **IF "NO_CITATION_FOUND":** Do NOT invent a citation.
-    *   **IF CITATION EXISTS:** Use it to inform the tone.
-3.  **OBEY THE KNOT (CRITICAL):**
-    *   Read 'nuance'. The sentence must demonstrate this rule using the Hero word.
-4.  **SELECT SUPPORT:** 
-    *   Pick words from the Pool.
-5.  **FILL THE ROW:**
-    *   **target_sentence:** The Modern Greek sentence.
-    *   **source_sentence:** The English translation.
-
-**OUTPUT:** Provide a valid JSON list of objects.
+### INPUT DATA TO PROCESS:
 """
         return text
 
