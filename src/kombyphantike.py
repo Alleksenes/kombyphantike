@@ -71,6 +71,8 @@ class KombyphantikeEngine:
         if PARADIGMS_PATH.exists():
             with open(PARADIGMS_PATH, "r", encoding="utf-8") as f:
                 self.paradigms = json.load(f)
+        else:
+            logger.warning(f"Paradigms file not found at {PARADIGMS_PATH}")
 
         # Pre-processing Scores
         self.kelly["ID"] = pd.to_numeric(self.kelly["ID"], errors="coerce")
@@ -129,14 +131,23 @@ class KombyphantikeEngine:
         doc = model(text)
         tokens = []
         for token in doc:
-            tokens.append({
+            token_dict = {
                 "text": token.text,
                 "lemma": token.lemma_,
                 "pos": token.pos_,
                 "tag": token.tag_,
                 "dep": token.dep_,
                 "is_alpha": token.is_alpha
-            })
+            }
+
+            if token.lemma_ in self.paradigms:
+                token_dict["has_paradigm"] = True
+                token_dict["paradigm"] = self.paradigms[token.lemma_]
+            else:
+                token_dict["has_paradigm"] = False
+                token_dict["paradigm"] = None
+
+            tokens.append(token_dict)
         return tokens
 
     def tokenize_text(self, text: str, lang: str) -> list:
