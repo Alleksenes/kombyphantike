@@ -67,12 +67,7 @@ class KombyphantikeEngine:
                 self.progress = json.load(f)
 
         # Load Paradigms
-        self.paradigms = {}
-        if PARADIGMS_PATH.exists():
-            with open(PARADIGMS_PATH, "r", encoding="utf-8") as f:
-                self.paradigms = json.load(f)
-        else:
-            logger.warning(f"Paradigms file not found at {PARADIGMS_PATH}")
+        self.paradigms = self._load_paradigms()
 
         # Pre-processing Scores
         self.kelly["ID"] = pd.to_numeric(self.kelly["ID"], errors="coerce")
@@ -119,9 +114,19 @@ class KombyphantikeEngine:
                 except:
                     print("Spacy missing. Semantic search will be degraded.")
 
+    def _load_paradigms(self):
+        """Loads inflection tables from JSON if available."""
+        if PARADIGMS_PATH.exists():
+            with open(PARADIGMS_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        else:
+            logger.warning(f"Paradigms file not found at {PARADIGMS_PATH}")
+            return {}
+
     def _tokenize(self, text: str, lang: str) -> list:
         """
         Helper: Tokenizes text into structured objects.
+        Links inflection paradigms if available in self.paradigms.
         """
         model = self.nlp_el if lang in ["el", "greek"] else self.nlp_en
 
@@ -140,12 +145,9 @@ class KombyphantikeEngine:
                 "is_alpha": token.is_alpha
             }
 
-            if token.lemma_ in self.paradigms:
-                token_dict["has_paradigm"] = True
-                token_dict["paradigm"] = self.paradigms[token.lemma_]
-            else:
-                token_dict["has_paradigm"] = False
-                token_dict["paradigm"] = None
+            paradigm = self.paradigms.get(token.lemma_)
+            token_dict["has_paradigm"] = paradigm is not None
+            token_dict["paradigm"] = paradigm
 
             tokens.append(token_dict)
         return tokens
