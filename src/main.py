@@ -56,7 +56,7 @@ def run_pipeline():
     ingestor.scan_hellenic_core()
     ingestor.scan_english_gloss()
     # ingestor.bridge_gap_fallback() # Disabled
-    ingestor.save_paradigms()
+    # ingestor.save_paradigms()  #Disabled
 
     master_lookup = ingestor.master_lookup
     kelly_df = ingestor.kelly_df
