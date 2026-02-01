@@ -135,6 +135,12 @@ class KombyphantikeEngine:
         if not model:
             return []
 
+        # Irregular Map: Hardcoded overrides for common tricky verbs
+        irregular_map = {
+            "είναι": "είμαι",
+            "ήταν": "είμαι",
+        }
+
         doc = model(text)
         tokens = []
         for token in doc:
@@ -147,7 +153,17 @@ class KombyphantikeEngine:
                 "is_alpha": token.is_alpha,
             }
 
-            paradigm = self.paradigms.get(token.lemma_)
+            # 1. Determine effective lemma (check irregulars first)
+            text_lower = token.text.lower()
+            lemma_candidate = irregular_map.get(text_lower, token.lemma_)
+
+            # 2. Try looking up by lemma
+            paradigm = self.paradigms.get(lemma_candidate)
+
+            # 3. Fallback: Try looking up by text.lower() if lemma failed
+            if paradigm is None:
+                paradigm = self.paradigms.get(text_lower)
+
             token_dict["has_paradigm"] = paradigm is not None
             token_dict["paradigm"] = paradigm
 

@@ -99,5 +99,62 @@ class TestKombyphantikeParadigms(unittest.TestCase):
                 self.assertFalse(tokens[0]['has_paradigm'])
                 self.assertIsNone(tokens[0]['paradigm'])
 
+    @patch('src.kombyphantike.pd.read_csv')
+    @patch('src.kombyphantike.open')
+    def test_tokenize_irregular_and_fallback(self, mock_open_func, mock_read_csv):
+        mock_read_csv.return_value = self.mock_df
+
+        # Mock paradigms with irregular target and a fallback case
+        extended_paradigms = {
+            "είμαι": [{"form": "είμαι", "tags": ["pres"]}],
+            "fallback_word": [{"form": "fallback_word", "tags": ["noun"]}]
+        }
+
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+
+        with patch('src.kombyphantike.PARADIGMS_PATH', new=mock_path):
+            with patch('json.load', return_value=extended_paradigms):
+                mock_nlp = MagicMock()
+
+                # Token 1: "είναι" -> Should map to "είμαι"
+                t1 = MagicMock()
+                t1.text = "είναι"
+                t1.lemma_ = "wrong_lemma" # Simulate bad spacy lemma
+                t1.pos_ = "VERB"
+                t1.tag_ = "tag"
+                t1.dep_ = "root"
+                t1.is_alpha = True
+
+                # Token 2: "fallback_word" -> Lemma missing in paradigms, but text is there
+                t2 = MagicMock()
+                t2.text = "fallback_word" # Lowercase matches key
+                t2.lemma_ = "unknown_lemma"
+                t2.pos_ = "NOUN"
+                t2.tag_ = "tag"
+                t2.dep_ = "obj"
+                t2.is_alpha = True
+
+                mock_doc = [t1, t2]
+                mock_nlp.return_value = mock_doc
+
+                with patch('src.kombyphantike.spacy.load', return_value=mock_nlp):
+                    engine = KombyphantikeEngine()
+                    engine.nlp_el = mock_nlp
+
+                    tokens = engine.tokenize_text("είναι fallback_word", "el")
+
+                    self.assertEqual(len(tokens), 2)
+
+                    # Check irregular mapping
+                    # "είναι" text -> "είμαι" lemma lookup
+                    self.assertTrue(tokens[0]['has_paradigm'])
+                    self.assertEqual(tokens[0]['paradigm'], extended_paradigms["είμαι"])
+
+                    # Check fallback
+                    # "fallback_word" lemma "unknown_lemma" fails -> fallback to text "fallback_word"
+                    self.assertTrue(tokens[1]['has_paradigm'])
+                    self.assertEqual(tokens[1]['paradigm'], extended_paradigms["fallback_word"])
+
 if __name__ == '__main__':
     unittest.main()
