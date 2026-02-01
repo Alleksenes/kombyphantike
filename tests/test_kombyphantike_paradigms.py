@@ -16,10 +16,12 @@ from src.kombyphantike import KombyphantikeEngine
 class TestKombyphantikeParadigms(unittest.TestCase):
     def setUp(self):
         self.mock_paradigms = {
-            "test_lemma": [
-                {"form": "test_lemma", "tags": ["nom"]},
-                {"form": "test_lemma_gen", "tags": ["gen"]}
-            ]
+            "test_lemma": {
+                "forms": [
+                    {"form": "test_lemma", "tags": ["nom"]},
+                    {"form": "test_lemma_gen", "tags": ["gen"]}
+                ]
+            }
         }
         self.mock_df = pd.DataFrame({
             "Part of speech": ["Noun"],
@@ -104,10 +106,19 @@ class TestKombyphantikeParadigms(unittest.TestCase):
     def test_tokenize_irregular_and_fallback(self, mock_open_func, mock_read_csv):
         mock_read_csv.return_value = self.mock_df
 
-        # Mock paradigms with irregular target and a fallback case
+        # Mock paradigms with auxiliary irregular check and a fallback case
         extended_paradigms = {
-            "είμαι": [{"form": "είμαι", "tags": ["pres"]}],
-            "fallback_word": [{"form": "fallback_word", "tags": ["noun"]}]
+            "είμαι": {
+                "forms": [
+                    {"form": "είμαι", "tags": ["pres"]},
+                    {"form": "είναι", "tags": ["pres", "3sg"]} # "είναι" exists here
+                ]
+            },
+            "fallback_word": {
+                "forms": [
+                    {"form": "fallback_word", "tags": ["noun"]}
+                ]
+            }
         }
 
         mock_path = MagicMock()
@@ -117,10 +128,10 @@ class TestKombyphantikeParadigms(unittest.TestCase):
             with patch('json.load', return_value=extended_paradigms):
                 mock_nlp = MagicMock()
 
-                # Token 1: "είναι" -> Should map to "είμαι"
+                # Token 1: "είναι" -> Should find "είμαι" via auxiliary check
                 t1 = MagicMock()
                 t1.text = "είναι"
-                t1.lemma_ = "wrong_lemma" # Simulate bad spacy lemma
+                t1.lemma_ = "είναι" # Spacy says lemma is "είναι", which triggers auxiliary check
                 t1.pos_ = "VERB"
                 t1.tag_ = "tag"
                 t1.dep_ = "root"
@@ -146,10 +157,11 @@ class TestKombyphantikeParadigms(unittest.TestCase):
 
                     self.assertEqual(len(tokens), 2)
 
-                    # Check irregular mapping
-                    # "είναι" text -> "είμαι" lemma lookup
+                    # Check irregular mapping (Auxiliary Check)
+                    # "είναι" (lemma "είναι") -> checks "είμαι" forms -> finds "είναι" -> uses "είμαι" paradigm
                     self.assertTrue(tokens[0]['has_paradigm'])
                     self.assertEqual(tokens[0]['paradigm'], extended_paradigms["είμαι"])
+                    self.assertEqual(tokens[0]['lemma'], "είμαι") # Lemma should be corrected
 
                     # Check fallback
                     # "fallback_word" lemma "unknown_lemma" fails -> fallback to text "fallback_word"

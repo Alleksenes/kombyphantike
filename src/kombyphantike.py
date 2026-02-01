@@ -135,11 +135,8 @@ class KombyphantikeEngine:
         if not model:
             return []
 
-        # Irregular Map: Hardcoded overrides for common tricky verbs
-        irregular_map = {
-            "είναι": "είμαι",
-            "ήταν": "είμαι",
-        }
+        # Common auxiliaries to check if Spacy gets confused (e.g. lemma "είναι" -> "είμαι")
+        AUXILIARIES = ["είμαι", "έχω"]
 
         doc = model(text)
         tokens = []
@@ -153,16 +150,33 @@ class KombyphantikeEngine:
                 "is_alpha": token.is_alpha,
             }
 
-            # 1. Determine effective lemma (check irregulars first)
-            text_lower = token.text.lower()
-            lemma_candidate = irregular_map.get(text_lower, token.lemma_)
+            # 1. Trust Spacy's lemma first
+            lemma = token.lemma_
+            paradigm = self.paradigms.get(lemma)
 
-            # 2. Try looking up by lemma
-            paradigm = self.paradigms.get(lemma_candidate)
+            # 2. Fallback / Correction for Auxiliary Irregulars
+            # If paradigm missing OR lemma is suspiciously "είναι" (which is a form, not lemma)
+            if paradigm is None or lemma in ["είναι", "ήταν"]:
+                text_lower = token.text.lower()
+                for aux in AUXILIARIES:
+                    aux_paradigm = self.paradigms.get(aux)
+                    if aux_paradigm:
+                        # Check if text exists as a form in this auxiliary paradigm
+                        # Structure: { "forms": [ {"form": "...", "tags": ...} ] }
+                        forms = aux_paradigm.get("forms", [])
+                        found = any(
+                            f.get("form") == text_lower
+                            for f in forms
+                        )
+                        if found:
+                            paradigm = aux_paradigm
+                            # Update token lemma to reflect the true paradigm root
+                            token_dict["lemma"] = aux
+                            break
 
-            # 3. Fallback: Try looking up by text.lower() if lemma failed
+            # 3. Last Resort: Try looking up by text.lower() (if un-lemmatized input matches a lemma key)
             if paradigm is None:
-                paradigm = self.paradigms.get(text_lower)
+                paradigm = self.paradigms.get(token.text.lower())
 
             token_dict["has_paradigm"] = paradigm is not None
             token_dict["paradigm"] = paradigm
@@ -509,7 +523,11 @@ class KombyphantikeEngine:
     def _check_paradigm_for_plural(self, lemma):
         if lemma not in self.paradigms:
             return True  # Benefit of doubt
-        forms = self.paradigms[lemma]
+
+        # Structure is { "forms": [...] }
+        paradigm_entry = self.paradigms[lemma]
+        forms = paradigm_entry.get("forms", [])
+
         return any(
             "plural" in str(f.get("tags", [])).lower()
             or "πληθυντικός" in str(f.get("raw_tags", [])).lower()
@@ -526,7 +544,7 @@ class KombyphantikeEngine:
         # 2. Cross-Mine Corpus
         hero_forms = {hero}
         if hero in self.paradigms:
-            for f in self.paradigms[hero]:
+            for f in self.paradigms[hero].get("forms", []):
                 hero_forms.add(f["form"])
 
         found_count = 0

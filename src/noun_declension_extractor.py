@@ -97,6 +97,25 @@ class ParadigmExtractor:
                     row["Voc_Pl"] = form_text
         return row
 
+    def extract_structured_forms(self, entry):
+        forms_list = entry.get("forms", [])
+        valid_forms = []
+        for f in forms_list:
+            tags = f.get("tags", [])
+            form_text = f.get("form", "")
+
+            # Filter garbage
+            if "romanization" in tags or "table-tags" in tags:
+                continue
+            if not form_text:
+                continue
+
+            valid_forms.append({
+                "form": form_text,
+                "tags": tags
+            })
+        return valid_forms
+
     def extract_verb_forms(self, entry):
         forms_list = entry.get("forms", [])
 
@@ -185,21 +204,29 @@ class ParadigmExtractor:
                         continue
 
                     if pos == "noun":
-                        forms = self.extract_noun_forms(entry)
-                        paradigms[word] = forms
-                        # Add Lemma back for CSV
-                        forms_csv = forms.copy()
+                        # Legacy CSV
+                        flat_forms = self.extract_noun_forms(entry)
+                        forms_csv = flat_forms.copy()
                         forms_csv["Lemma"] = word
                         self.noun_data.append(forms_csv)
+
+                        # Structured JSON
+                        structured_forms = self.extract_structured_forms(entry)
+                        paradigms[word] = {"forms": structured_forms}
+
                         seen_lemmas.add(word)
 
                     elif pos == "verb":
-                        forms = self.extract_verb_forms(entry)
-                        paradigms[word] = forms
-                        # Add Lemma back for CSV
-                        forms_csv = forms.copy()
+                        # Legacy CSV
+                        flat_forms = self.extract_verb_forms(entry)
+                        forms_csv = flat_forms.copy()
                         forms_csv["Lemma"] = word
                         self.verb_data.append(forms_csv)
+
+                        # Structured JSON
+                        structured_forms = self.extract_structured_forms(entry)
+                        paradigms[word] = {"forms": structured_forms}
+
                         seen_lemmas.add(word)
 
                 except json.JSONDecodeError:
