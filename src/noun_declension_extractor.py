@@ -55,10 +55,8 @@ class ParadigmExtractor:
         return g
 
     def extract_noun_forms(self, entry):
-        lemma = entry.get("word")
         forms_list = entry.get("forms", [])
         row = {
-            "Lemma": lemma,
             "Gender": self.get_gender(entry),
             "Nom_Sg": "",
             "Gen_Sg": "",
@@ -100,12 +98,10 @@ class ParadigmExtractor:
         return row
 
     def extract_verb_forms(self, entry):
-        lemma = entry.get("word")
         forms_list = entry.get("forms", [])
 
         # Focus on Present Active Indicative for now + basic Past
         row = {
-            "Lemma": lemma,
             "Pres_Act_1Sg": "",
             "Pres_Act_2Sg": "",
             "Pres_Act_3Sg": "",
@@ -162,9 +158,18 @@ class ParadigmExtractor:
 
         return row
 
-    def run(self):
+    def extract_all(self):
+        """
+        Main method to return all paradigms as a dictionary.
+        Returns: { "lemma": { ...forms... } }
+        """
         self.load_targets()
         logger.info(f"Scanning Kaikki dictionary...")
+        paradigms = {}
+
+        # Reset internal storage for CSV generation if this is called first
+        self.noun_data = []
+        self.verb_data = []
         seen_lemmas = set()
 
         with open(KAIKKI_EL_FILE, "r", encoding="utf-8") as f:
@@ -177,17 +182,36 @@ class ParadigmExtractor:
                     if word not in self.target_lemmas:
                         continue
                     if word in seen_lemmas:
-                        continue  # Simple dedup
+                        continue
 
                     if pos == "noun":
-                        self.noun_data.append(self.extract_noun_forms(entry))
+                        forms = self.extract_noun_forms(entry)
+                        paradigms[word] = forms
+                        # Add Lemma back for CSV
+                        forms_csv = forms.copy()
+                        forms_csv["Lemma"] = word
+                        self.noun_data.append(forms_csv)
                         seen_lemmas.add(word)
+
                     elif pos == "verb":
-                        self.verb_data.append(self.extract_verb_forms(entry))
+                        forms = self.extract_verb_forms(entry)
+                        paradigms[word] = forms
+                        # Add Lemma back for CSV
+                        forms_csv = forms.copy()
+                        forms_csv["Lemma"] = word
+                        self.verb_data.append(forms_csv)
                         seen_lemmas.add(word)
 
                 except json.JSONDecodeError:
                     continue
+
+        return paradigms
+
+    def run(self):
+        """
+        Legacy run method to save CSVs.
+        """
+        self.extract_all()
 
         # Save Nouns
         df_noun = pd.DataFrame(self.noun_data)

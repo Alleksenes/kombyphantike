@@ -9,6 +9,7 @@ from src.config import (
     COL_LEMMA,
     PROCESSED_DIR,
 )
+from src.noun_declension_extractor import ParadigmExtractor
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("HybridIngestor")
@@ -78,16 +79,14 @@ class HybridIngestor:
                             "lemma": word,
                             "pos": entry.get("pos"),
                             "etymology_text_el": entry.get("etymology_text", ""),
-                            "forms": entry.get("forms", []),
+                            # forms handled by ParadigmExtractor
                             "senses_el": [],
                             "senses_en": [],
                             "examples": [],
                             "synonyms": [],
                         }
                     else:
-                        # MERGE FORMS/ETYMOLOGY IF MISSING
-                        if not self.master_lookup[word]["forms"] and entry.get("forms"):
-                            self.master_lookup[word]["forms"] = entry.get("forms")
+                        # MERGE ETYMOLOGY IF MISSING
                         if not self.master_lookup[word][
                             "etymology_text_el"
                         ] and entry.get("etymology_text"):
@@ -95,7 +94,7 @@ class HybridIngestor:
                                 "etymology_text"
                             )
 
-                    # ALWAYS APPEND DATA (The Fix)
+                    # ALWAYS APPEND DATA
                     for sense in entry.get("senses", []):
                         tags = sense.get("tags", []) + sense.get("raw_tags", [])
                         for gloss in sense.get("glosses", []):
@@ -171,31 +170,21 @@ class HybridIngestor:
 
         logger.info(f"English Pass Complete. Enriched {hits} words.")
 
-    def bridge_gap_fallback(self):
-        """Pass 3: Use Greek Definition if English missing"""
-        logger.info("Bridging gaps (Fallback)...")
-        # DISABLED: We want separation.
-        # If enabled, uncomment below:
-        # for word, data in self.master_lookup.items():
-        #     if not data['senses_en'] and data['senses_el']:
-        #         data['senses_en'] = data['senses_el']
+    def run(self):
+        self.load_kelly()
+        self.scan_hellenic_core()
+        self.scan_english_gloss()
 
-    def save_paradigms(self):
-        paradigms = {}
-        for word, data in self.master_lookup.items():
-            if data["forms"]:
-                paradigms[word] = data["forms"]
+        # Integrate ParadigmExtractor
+        logger.info("Extracting Paradigms via ParadigmExtractor...")
+        extractor = ParadigmExtractor()
+        # Optimization: ParadigmExtractor re-loads targets, which is fine but we could pass them if we changed API
+        paradigms = extractor.extract_all()
 
         with open(PARADIGMS_FILE, "w", encoding="utf-8") as f:
             json.dump(paradigms, f, ensure_ascii=False, indent=2)
         logger.info(f"Saved {len(paradigms)} paradigms to {PARADIGMS_FILE}")
 
-    def run(self):
-        self.load_kelly()
-        self.scan_hellenic_core()
-        self.scan_english_gloss()
-        # self.bridge_gap_fallback() # Disabled
-        self.save_paradigms()
         return self.master_lookup
 
 
