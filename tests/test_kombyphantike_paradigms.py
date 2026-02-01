@@ -16,10 +16,12 @@ from src.kombyphantike import KombyphantikeEngine
 class TestKombyphantikeParadigms(unittest.TestCase):
     def setUp(self):
         self.mock_paradigms = {
-            "test_lemma": [
-                {"form": "test_lemma", "tags": ["nom"]},
-                {"form": "test_lemma_gen", "tags": ["gen"]}
-            ]
+            "test_lemma": {
+                "forms": [
+                    {"form": "test_lemma", "tags": ["nom"]},
+                    {"form": "test_lemma_gen", "tags": ["gen"]}
+                ]
+            }
         }
         self.mock_df = pd.DataFrame({
             "Part of speech": ["Noun"],
@@ -98,6 +100,73 @@ class TestKombyphantikeParadigms(unittest.TestCase):
 
                 self.assertFalse(tokens[0]['has_paradigm'])
                 self.assertIsNone(tokens[0]['paradigm'])
+
+    @patch('src.kombyphantike.pd.read_csv')
+    @patch('src.kombyphantike.open')
+    def test_tokenize_irregular_and_fallback(self, mock_open_func, mock_read_csv):
+        mock_read_csv.return_value = self.mock_df
+
+        # Mock paradigms with auxiliary irregular check and a fallback case
+        extended_paradigms = {
+            "είμαι": {
+                "forms": [
+                    {"form": "είμαι", "tags": ["pres"]},
+                    {"form": "είναι", "tags": ["pres", "3sg"]} # "είναι" exists here
+                ]
+            },
+            "fallback_word": {
+                "forms": [
+                    {"form": "fallback_word", "tags": ["noun"]}
+                ]
+            }
+        }
+
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+
+        with patch('src.kombyphantike.PARADIGMS_PATH', new=mock_path):
+            with patch('json.load', return_value=extended_paradigms):
+                mock_nlp = MagicMock()
+
+                # Token 1: "είναι" -> Should find "είμαι" via auxiliary check
+                t1 = MagicMock()
+                t1.text = "είναι"
+                t1.lemma_ = "είναι" # Spacy says lemma is "είναι", which triggers auxiliary check
+                t1.pos_ = "VERB"
+                t1.tag_ = "tag"
+                t1.dep_ = "root"
+                t1.is_alpha = True
+
+                # Token 2: "fallback_word" -> Lemma missing in paradigms, but text is there
+                t2 = MagicMock()
+                t2.text = "fallback_word" # Lowercase matches key
+                t2.lemma_ = "unknown_lemma"
+                t2.pos_ = "NOUN"
+                t2.tag_ = "tag"
+                t2.dep_ = "obj"
+                t2.is_alpha = True
+
+                mock_doc = [t1, t2]
+                mock_nlp.return_value = mock_doc
+
+                with patch('src.kombyphantike.spacy.load', return_value=mock_nlp):
+                    engine = KombyphantikeEngine()
+                    engine.nlp_el = mock_nlp
+
+                    tokens = engine.tokenize_text("είναι fallback_word", "el")
+
+                    self.assertEqual(len(tokens), 2)
+
+                    # Check irregular mapping (Auxiliary Check)
+                    # "είναι" (lemma "είναι") -> checks "είμαι" forms -> finds "είναι" -> uses "είμαι" paradigm
+                    self.assertTrue(tokens[0]['has_paradigm'])
+                    self.assertEqual(tokens[0]['paradigm'], extended_paradigms["είμαι"])
+                    self.assertEqual(tokens[0]['lemma'], "είμαι") # Lemma should be corrected
+
+                    # Check fallback
+                    # "fallback_word" lemma "unknown_lemma" fails -> fallback to text "fallback_word"
+                    self.assertTrue(tokens[1]['has_paradigm'])
+                    self.assertEqual(tokens[1]['paradigm'], extended_paradigms["fallback_word"])
 
 if __name__ == '__main__':
     unittest.main()
