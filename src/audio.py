@@ -1,4 +1,3 @@
-import edge_tts
 import io
 import base64
 
@@ -6,6 +5,14 @@ async def generate_audio(text: str, voice: str = "el-GR-NestorasNeural") -> str:
     """
     Generates audio from text using Microsoft Edge TTS and returns it as a Base64 string.
     """
+    try:
+        import edge_tts
+    except ImportError:
+        raise ImportError(
+            "The 'edge_tts' module is required for audio generation. "
+            "Please install it using 'pip install edge-tts'."
+        )
+
     communicate = edge_tts.Communicate(text, voice)
 
     audio_data = io.BytesIO()
