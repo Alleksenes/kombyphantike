@@ -161,16 +161,21 @@ class KombyphantikeEngine:
                 for aux in AUXILIARIES:
                     aux_paradigm = self.paradigms.get(aux)
                     if aux_paradigm:
-                        # Check if text exists as a form in this auxiliary paradigm
-                        # Structure: { "forms": [ {"form": "...", "tags": ...} ] }
-                        forms = aux_paradigm.get("forms", [])
-                        found = any(
-                            f.get("form") == text_lower
-                            for f in forms
-                        )
+                        # HANDLE DATA STRUCTURE VARIANCE (List vs Dict)
+                        if isinstance(aux_paradigm, list):
+                            forms = aux_paradigm
+                        elif isinstance(aux_paradigm, dict):
+                            forms = aux_paradigm.get("forms", [])
+                        else:
+                            forms = []
+
+                        # Check if text exists as a form
+                        found = any(f.get("form") == text_lower for f in forms)
                         if found:
+                            # If found, use the auxiliary lemma paradigm
+                            # BUT FIRST: Ensure paradigm is in the list format expected by API?
+                            # Actually, if we return a list here, and the frontend expects a list, we are good.
                             paradigm = aux_paradigm
-                            # Update token lemma to reflect the true paradigm root
                             token_dict["lemma"] = aux
                             break
 
