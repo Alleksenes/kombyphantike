@@ -14,6 +14,7 @@ KELLY_CSV = PROCESSED_DIR / "kelly.csv"
 class ParadigmExtractor:
     def __init__(self):
         self.target_lemmas = set()
+        # Deprecated storage for CSVs
         self.noun_data = []
         self.verb_data = []
 
@@ -40,153 +41,48 @@ class ParadigmExtractor:
             )
         logger.info(f"Targeting {len(self.target_lemmas)} lemmas.")
 
-    def get_gender(self, entry):
-        head_templates = entry.get("head_templates", [])
-        if not head_templates:
-            return ""
-        args = head_templates[0].get("args", {})
-        g = args.get("g") or args.get("1") or ""
-        if "m" in g:
-            return "Masc"
-        if "f" in g:
-            return "Fem"
-        if "n" in g:
-            return "Neut"
-        return g
-
-    def extract_noun_forms(self, entry):
-        forms_list = entry.get("forms", [])
-        row = {
-            "Gender": self.get_gender(entry),
-            "Nom_Sg": "",
-            "Gen_Sg": "",
-            "Acc_Sg": "",
-            "Voc_Sg": "",
-            "Nom_Pl": "",
-            "Gen_Pl": "",
-            "Acc_Pl": "",
-            "Voc_Pl": "",
-        }
-
-        def is_greek(tags):
-            return "romanization" not in tags and "table-tags" not in tags
-
-        for f in forms_list:
-            tags = f.get("tags", [])
-            form_text = f.get("form", "")
-            if not form_text or not is_greek(tags):
-                continue
-
-            if "singular" in tags:
-                if "nominative" in tags:
-                    row["Nom_Sg"] = form_text
-                elif "genitive" in tags:
-                    row["Gen_Sg"] = form_text
-                elif "accusative" in tags:
-                    row["Acc_Sg"] = form_text
-                elif "vocative" in tags:
-                    row["Voc_Sg"] = form_text
-            elif "plural" in tags:
-                if "nominative" in tags:
-                    row["Nom_Pl"] = form_text
-                elif "genitive" in tags:
-                    row["Gen_Pl"] = form_text
-                elif "accusative" in tags:
-                    row["Acc_Pl"] = form_text
-                elif "vocative" in tags:
-                    row["Voc_Pl"] = form_text
-        return row
-
     def extract_structured_forms(self, entry):
         forms_list = entry.get("forms", [])
         valid_forms = []
         for f in forms_list:
             tags = f.get("tags", [])
+            raw_tags = f.get("raw_tags", [])
             form_text = f.get("form", "")
 
-            # Filter garbage
+            # 1. Filter Garbage
+            # Exclude romanizations and table tags
             if "romanization" in tags or "table-tags" in tags:
                 continue
+
+            # Check for junk in text
             if not form_text:
                 continue
 
+            # Junk templates often leaked into form text
+            if form_text.startswith("el-conjug") or \
+               "Formed using" in form_text or \
+               form_text.startswith("-"): # Optional: suffixes often not useful as independent forms, but maybe keep?
+                                          # Requirement said "clean all junk".
+                                          # I'll stick to the specific examples + reasonable heuristic.
+               continue
+
             valid_forms.append({
                 "form": form_text,
-                "tags": tags
+                "tags": tags,
+                "raw_tags": raw_tags
             })
         return valid_forms
-
-    def extract_verb_forms(self, entry):
-        forms_list = entry.get("forms", [])
-
-        # Focus on Present Active Indicative for now + basic Past
-        row = {
-            "Pres_Act_1Sg": "",
-            "Pres_Act_2Sg": "",
-            "Pres_Act_3Sg": "",
-            "Pres_Act_1Pl": "",
-            "Pres_Act_2Pl": "",
-            "Pres_Act_3Pl": "",
-            "Past_Act_1Sg": "",  # Aorist or Imperfect
-            "Future_Act_1Sg": "",
-        }
-
-        def is_greek(tags):
-            return "romanization" not in tags and "table-tags" not in tags
-
-        for f in forms_list:
-            tags = f.get("tags", [])
-            form_text = f.get("form", "")
-            if not form_text or not is_greek(tags):
-                continue
-
-            # Active Voice
-            if (
-                "active" in tags or "passive" not in tags
-            ):  # Default to active if unspecified? Safe assumption for now
-                if "indicative" in tags:
-                    if "present" in tags:
-                        if "first-person" in tags and "singular" in tags:
-                            row["Pres_Act_1Sg"] = form_text
-                        if "second-person" in tags and "singular" in tags:
-                            row["Pres_Act_2Sg"] = form_text
-                        if "third-person" in tags and "singular" in tags:
-                            row["Pres_Act_3Sg"] = form_text
-                        if "first-person" in tags and "plural" in tags:
-                            row["Pres_Act_1Pl"] = form_text
-                        if "second-person" in tags and "plural" in tags:
-                            row["Pres_Act_2Pl"] = form_text
-                        if "third-person" in tags and "plural" in tags:
-                            row["Pres_Act_3Pl"] = form_text
-
-                    if (
-                        ("past" in tags or "imperfect" in tags or "perfective" in tags)
-                        and "first-person" in tags
-                        and "singular" in tags
-                    ):
-                        # Prioritize Aorist (perfective past) if available, else Imperfect
-                        if not row["Past_Act_1Sg"] or "perfective" in tags:
-                            row["Past_Act_1Sg"] = form_text
-
-                    if (
-                        "future" in tags
-                        and "first-person" in tags
-                        and "singular" in tags
-                    ):
-                        row["Future_Act_1Sg"] = form_text
-
-        return row
 
     def extract_all(self):
         """
         Main method to return all paradigms as a dictionary.
-        Returns: { "lemma": { ...forms... } }
+        Returns: { "lemma": [ { "form": "...", "tags": [...], "raw_tags": [...] } ] }
         """
         self.load_targets()
         logger.info(f"Scanning Kaikki dictionary...")
         paradigms = {}
 
-        # Reset internal storage for CSV generation if this is called first
+        # Reset internal storage for CSV generation (Deprecated but kept for safety/structure)
         self.noun_data = []
         self.verb_data = []
         seen_lemmas = set()
@@ -196,37 +92,24 @@ class ParadigmExtractor:
                 try:
                     entry = json.loads(line)
                     word = entry.get("word")
-                    pos = entry.get("pos")
 
+                    # Filter by target list
                     if word not in self.target_lemmas:
                         continue
                     if word in seen_lemmas:
                         continue
 
-                    if pos == "noun":
-                        # Legacy CSV
-                        flat_forms = self.extract_noun_forms(entry)
-                        forms_csv = flat_forms.copy()
-                        forms_csv["Lemma"] = word
-                        self.noun_data.append(forms_csv)
+                    # We now accept ANY word that has forms (Noun, Verb, Adjective, etc.)
+                    # Check if 'forms' exists and is not empty
+                    if not entry.get("forms"):
+                        continue
 
-                        # Structured JSON
-                        structured_forms = self.extract_structured_forms(entry)
-                        paradigms[word] = {"forms": structured_forms}
+                    # Extract Structured Forms (Lossless)
+                    structured_forms = self.extract_structured_forms(entry)
 
-                        seen_lemmas.add(word)
-
-                    elif pos == "verb":
-                        # Legacy CSV
-                        flat_forms = self.extract_verb_forms(entry)
-                        forms_csv = flat_forms.copy()
-                        forms_csv["Lemma"] = word
-                        self.verb_data.append(forms_csv)
-
-                        # Structured JSON
-                        structured_forms = self.extract_structured_forms(entry)
-                        paradigms[word] = {"forms": structured_forms}
-
+                    if structured_forms:
+                        # New Structure: Direct List
+                        paradigms[word] = structured_forms
                         seen_lemmas.add(word)
 
                 except json.JSONDecodeError:
@@ -236,56 +119,22 @@ class ParadigmExtractor:
 
     def run(self):
         """
-        Legacy run method to save CSVs.
+        Legacy run method.
+        CSV generation is now deprioritized/disabled to focus on JSON source of truth.
         """
         self.extract_all()
+        logger.info("Paradigm extraction complete. CSV generation skipped (Deprecated).")
 
+        # Legacy CSV code commented out per instructions:
         # Save Nouns
-        df_noun = pd.DataFrame(self.noun_data)
-        if not df_noun.empty:
-            df_noun = df_noun.sort_values(by="Lemma")
-            cols = [
-                "Lemma",
-                "Gender",
-                "Nom_Sg",
-                "Gen_Sg",
-                "Acc_Sg",
-                "Voc_Sg",
-                "Nom_Pl",
-                "Gen_Pl",
-                "Acc_Pl",
-                "Voc_Pl",
-            ]
-            # Ensure cols exist
-            for c in cols:
-                if c not in df_noun.columns:
-                    df_noun[c] = ""
-            df_noun = df_noun[cols]
-            df_noun.to_csv(NOUN_OUTPUT, index=False, encoding="utf-8-sig")
-            logger.info(f"Saved {len(df_noun)} nouns to {NOUN_OUTPUT}")
+        # df_noun = pd.DataFrame(self.noun_data)
+        # if not df_noun.empty:
+        #     ... (saving logic)
 
         # Save Verbs
-        df_verb = pd.DataFrame(self.verb_data)
-        if not df_verb.empty:
-            df_verb = df_verb.sort_values(by="Lemma")
-            cols = [
-                "Lemma",
-                "Pres_Act_1Sg",
-                "Pres_Act_2Sg",
-                "Pres_Act_3Sg",
-                "Pres_Act_1Pl",
-                "Pres_Act_2Pl",
-                "Pres_Act_3Pl",
-                "Past_Act_1Sg",
-                "Future_Act_1Sg",
-            ]
-            # Ensure cols exist
-            for c in cols:
-                if c not in df_verb.columns:
-                    df_verb[c] = ""
-            df_verb = df_verb[cols]
-            df_verb.to_csv(VERB_OUTPUT, index=False, encoding="utf-8-sig")
-            logger.info(f"Saved {len(df_verb)} verbs to {VERB_OUTPUT}")
+        # df_verb = pd.DataFrame(self.verb_data)
+        # if not df_verb.empty:
+        #     ... (saving logic)
 
 
 if __name__ == "__main__":
