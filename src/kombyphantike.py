@@ -529,9 +529,12 @@ class KombyphantikeEngine:
         if lemma not in self.paradigms:
             return True  # Benefit of doubt
 
-        # Structure is { "forms": [...] }
+        # Structure is { "forms": [...] } OR [ ... ]
         paradigm_entry = self.paradigms[lemma]
-        forms = paradigm_entry.get("forms", [])
+        if isinstance(paradigm_entry, list):
+            forms = paradigm_entry
+        else:
+            forms = paradigm_entry.get("forms", [])
 
         return any(
             "plural" in str(f.get("tags", [])).lower()
@@ -549,7 +552,13 @@ class KombyphantikeEngine:
         # 2. Cross-Mine Corpus
         hero_forms = {hero}
         if hero in self.paradigms:
-            for f in self.paradigms[hero].get("forms", []):
+            p_entry = self.paradigms[hero]
+            if isinstance(p_entry, list):
+                forms = p_entry
+            else:
+                forms = p_entry.get("forms", [])
+
+            for f in forms:
                 hero_forms.add(f["form"])
 
         found_count = 0
