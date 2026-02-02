@@ -40,6 +40,33 @@ class KombyphantikeEngine:
         self.kelly = pd.read_csv(KELLY_PATH, dtype=str)
         self.knot_loader = KnotLoader()
 
+        # Index Dictionary for Fast Lookup
+        self.word_map = {}
+        # Robust extraction ensuring columns exist
+        has_lemma = "Lemma" in self.kelly.columns
+        has_md = "Modern_Def" in self.kelly.columns
+        has_gd = "Greek_Def" in self.kelly.columns
+        has_ac = "Ancient_Context" in self.kelly.columns
+        has_st = "Shift_Type" in self.kelly.columns
+
+        if not self.kelly.empty and has_lemma:
+            for idx in self.kelly.index:
+                lemma = str(self.kelly.at[idx, "Lemma"]).strip()
+                if not lemma or lemma == "nan":
+                    continue
+
+                md = str(self.kelly.at[idx, "Modern_Def"]) if has_md else ""
+                gd = str(self.kelly.at[idx, "Greek_Def"]) if has_gd else ""
+                ac = str(self.kelly.at[idx, "Ancient_Context"]) if has_ac else ""
+                st = str(self.kelly.at[idx, "Shift_Type"]) if has_st else ""
+
+                self.word_map[lemma] = {
+                    "Modern_Def": md if md != "nan" else "",
+                    "Greek_Def": gd if gd != "nan" else "",
+                    "Ancient_Context": ac if ac != "nan" else "",
+                    "Shift_Type": st if st != "nan" else "",
+                }
+
         # DYNAMIC COLUMN DETECTION
         self.pos_col = next(
             (
@@ -153,6 +180,22 @@ class KombyphantikeEngine:
             # 1. Trust Spacy's lemma first
             lemma = token.lemma_
             paradigm = self.paradigms.get(lemma)
+
+            # Metadata Injection
+            metadata = self.word_map.get(lemma)
+            if not metadata:
+                # Fallback: Look up by lower text
+                metadata = self.word_map.get(token.text.lower())
+
+            if metadata:
+                # Prefer Modern Def, fallback to Greek Def
+                definition = metadata["Modern_Def"]
+                if not definition:
+                    definition = metadata["Greek_Def"]
+
+                token_dict["definition"] = definition
+                token_dict["ancient_context"] = metadata["Ancient_Context"]
+                token_dict["semantic_shift"] = metadata["Shift_Type"]
 
             # 2. Fallback / Correction for Auxiliary Irregulars
             # If paradigm missing OR lemma is suspiciously "είναι" (which is a form, not lemma)
