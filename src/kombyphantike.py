@@ -181,6 +181,10 @@ class KombyphantikeEngine:
             lemma = token.lemma_
             paradigm = self.paradigms.get(lemma)
 
+            # Fallback: Try lowercase lemma
+            if paradigm is None:
+                paradigm = self.paradigms.get(lemma.lower())
+
             # Metadata Injection
             metadata = self.word_map.get(lemma)
             if not metadata:
@@ -552,6 +556,7 @@ class KombyphantikeEngine:
                     "optional_adverb": "",
                     "ancient_context": ancient_ctx,
                     "modern_context": modern_ctx,
+                    "knot_context": "",
                     "theme": f"{theme} (Focus: {hero})",
                 }
                 rows.append(row)
@@ -660,12 +665,13 @@ You must prioritize these words in your sentences:
 {pool_string}
 
 ### THE RULES OF ENGAGEMENT
-1. **The Format:** You will receive a list of JSON objects (The Blueprint). You must return the SAME list, but with the `target_sentence` (Modern Greek) and `source_sentence` (English) fields filled.
+1. **The Format:** You will receive a list of JSON objects (The Blueprint). You must return the SAME list, but with the `target_sentence` (Modern Greek), `source_sentence` (English), and `knot_context` fields filled.
 2. **The Logic (The Knot):** Look at the `nuance` field in each row. The Greek sentence **MUST** demonstrate this specific grammar rule using the word in the `theme` field (The Hero Word).
-3. **The Tone:** 
+3. **The Explanation (Knot Context):** For each sentence, write a 1-sentence explanation (`knot_context`) describing exactly how the Knot Rule was applied to the Hero word (e.g., 'Note how the stress moved to the ultimate syllable in the Genitive Plural').
+4. **The Tone:**
    *   **Sophisticated but Concise:** These will appear on a mobile screen. Avoid overly long sentences.
    *   **Resonant:** Use the `ancient_context` field to inspire the meaning, but write modern, natural Greek.
-4. **The Output:** Return **ONLY RAW JSON**. No Markdown formatting (```json), no conversational filler. Just the array.
+5. **The Output:** Return **ONLY RAW JSON**. No Markdown formatting (```json), no conversational filler. Just the array.
 
 ### INPUT DATA TO PROCESS:
 """
@@ -690,6 +696,7 @@ You must prioritize these words in your sentences:
                     "Optional Core Vocab (Adverb)": r.get("optional_adverb", ""),
                     "Ancient Context": r.get("ancient_context", ""),
                     "Modern Context": r.get("modern_context", ""),
+                    "Knot Context": r.get("knot_context", ""),
                     "Theme": r.get("theme", ""),
                 }
             )
@@ -723,6 +730,7 @@ You must prioritize these words in your sentences:
             "Optional Core Vocab (Adverb)",
             "Ancient Context",
             "Modern Context",
+            "Knot Context",
             "Theme",
         ]
 
