@@ -8,6 +8,7 @@ sys.modules["sentence_transformers"] = MagicMock()
 sys.modules["google"] = MagicMock()
 sys.modules["google.genai"] = MagicMock()
 sys.modules["google.genai.types"] = MagicMock()
+sys.modules["dotenv"] = MagicMock()
 
 # Mock src.kombyphantike module
 mock_engine_module = MagicMock()
@@ -16,35 +17,39 @@ mock_engine_module.KombyphantikeEngine = MagicMock()
 
 # Now import app
 from fastapi.testclient import TestClient
+from unittest.mock import patch, AsyncMock
 from src.api import app
 import base64
 import json
+import pytest
 
 client = TestClient(app)
 
-def test_speak_endpoint():
-    # Define a sample text
-    payload = {"text": "Καλημέρα κόσμε"}
+@pytest.mark.asyncio
+async def test_speak_endpoint():
+    # Mock the generate_audio function to avoid network calls and verify contract
+    with patch("src.api.generate_audio", new_callable=AsyncMock) as mock_generate:
+        mock_generate.return_value = "SGVsbG8gV29ybGQ=" # "Hello World" in base64
 
-    # Send POST request
-    response = client.post("/speak", json=payload)
+        # Define a sample text
+        payload = {"text": "Καλημέρα κόσμε"}
 
-    # Assert status code
-    assert response.status_code == 200
+        # Send POST request
+        response = client.post("/speak", json=payload)
 
-    # Assert JSON structure
-    json_response = response.json()
-    assert "audio_base64" in json_response
+        # Assert status code
+        assert response.status_code == 200
 
-    # Assert Base64 validity
-    b64_str = json_response["audio_base64"]
-    assert isinstance(b64_str, str)
-    assert len(b64_str) > 0
+        # Assert JSON structure
+        json_response = response.json()
+        assert "audio_data" in json_response
+        assert json_response["audio_data"].startswith("data:audio/mp3;base64,")
 
-    # Try decoding to check if it's valid base64
-    try:
-        decoded = base64.b64decode(b64_str)
-        # Check if it looks like an MP3
-        assert len(decoded) > 0
-    except Exception as e:
-        assert False, f"Failed to decode base64 audio: {e}"
+        # Extract base64 part
+        b64_str = json_response["audio_data"].split(",")[1]
+
+        # Assert expected mock value
+        assert b64_str == "SGVsbG8gV29ybGQ="
+
+        # Verify mock called
+        mock_generate.assert_called_once_with("Καλημέρα κόσμε")
