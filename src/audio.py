@@ -1,7 +1,7 @@
 import io
 import base64
 
-async def generate_audio(text: str, voice: str = "el-GR-NestorasNeural") -> str:
+async def generate_audio(text: str, voice: str = "el-GR-AthinaNeural") -> str:
     """
     Generates audio from text using Microsoft Edge TTS and returns it as a Base64 string.
     """

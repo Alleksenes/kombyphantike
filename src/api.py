@@ -206,7 +206,7 @@ def fill_curriculum(request: FillRequest):
 async def speak(request: SpeakRequest):
     try:
         audio_base64 = await generate_audio(request.text)
-        return {"audio_base64": audio_base64}
+        return {"audio_data": f"data:audio/mp3;base64,{audio_base64}"}
     except Exception as e:
         logger.error(f"Speak Error: {e}")
         raise HTTPException(500, str(e))

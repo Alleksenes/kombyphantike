@@ -34,11 +34,14 @@ def test_speak_endpoint():
 
     # Assert JSON structure
     json_response = response.json()
-    assert "audio_base64" in json_response
+    assert "audio_data" in json_response
 
     # Assert Base64 validity
-    b64_str = json_response["audio_base64"]
-    assert isinstance(b64_str, str)
+    data_uri = json_response["audio_data"]
+    assert isinstance(data_uri, str)
+    assert data_uri.startswith("data:audio/mp3;base64,")
+
+    b64_str = data_uri.split(",")[1]
     assert len(b64_str) > 0
 
     # Try decoding to check if it's valid base64
