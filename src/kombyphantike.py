@@ -13,6 +13,7 @@ from datetime import datetime
 from collections import Counter
 from src.config import PROCESSED_DIR, DATA_DIR
 from src.knot_loader import KnotLoader
+from transliterate import translit
 
 # Suppress warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -175,6 +176,10 @@ class KombyphantikeEngine:
                 "tag": token.tag_,
                 "dep": token.dep_,
                 "is_alpha": token.is_alpha,
+                "morphology": str(token.morph),
+                "transliteration": translit(token.text, "el", reversed=True)
+                if lang in ["el", "greek"]
+                else token.text,
             }
 
             # 1. Trust Spacy's lemma first
