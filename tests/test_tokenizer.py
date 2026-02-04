@@ -28,6 +28,9 @@ class TestTokenizer(unittest.TestCase):
         self.assertIn('dep', t0)
         self.assertIn('is_alpha', t0)
         self.assertIn('morphology', t0)
+        self.assertIsInstance(t0['morphology'], str)
+        self.assertIn('morphology_map', t0)
+        self.assertIsInstance(t0['morphology_map'], dict)
         self.assertIn('transliteration', t0)
         self.assertTrue(t0['is_alpha']) # "Το" is alpha
 

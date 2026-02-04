@@ -215,6 +215,9 @@ class KombyphantikeEngine:
                 # Fallback for older Spacy versions
                 morph_dict = {"raw": str(token.morph)}
 
+            # Stringify for API safety (React crash prevention)
+            morph_str = ", ".join(f"{k}: {v}" for k, v in morph_dict.items())
+
             token_dict = {
                 "text": token.text,
                 "lemma": token.lemma_,
@@ -222,7 +225,8 @@ class KombyphantikeEngine:
                 "tag": token.tag_,
                 "dep": token.dep_,
                 "is_alpha": token.is_alpha,
-                "morphology": morph_dict,
+                "morphology": morph_str,
+                "morphology_map": morph_dict,
                 "transliteration": translit(token.text, "el", reversed=True)
                 if lang in ["el", "greek"]
                 else token.text,
