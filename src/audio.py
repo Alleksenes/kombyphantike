@@ -1,30 +1,41 @@
-import io
 import base64
+from google.cloud import texttospeech
 
-async def generate_audio(text: str, voice: str = "el-GR-AthinaNeural") -> str:
+_client = None
+
+def get_client():
+    global _client
+    if _client is None:
+        _client = texttospeech.TextToSpeechAsyncClient()
+    return _client
+
+async def generate_audio(text: str, voice: str = "el-GR-Wavenet-A") -> str:
     """
-    Generates audio from text using Microsoft Edge TTS and returns it as a Base64 string.
+    Generates audio from text using Google Cloud Text-to-Speech (Async) and returns it as a Base64 string.
     """
-    try:
-        import edge_tts
-    except ImportError:
-        raise ImportError(
-            "The 'edge_tts' module is required for audio generation. "
-            "Please install it using 'pip install edge-tts'."
-        )
+    client = get_client()
 
-    communicate = edge_tts.Communicate(text, voice)
+    # Set the text input to be synthesized
+    synthesis_input = texttospeech.SynthesisInput(text=text)
 
-    audio_data = io.BytesIO()
+    # Build the voice request, select the language code and the specific voice
+    voice_params = texttospeech.VoiceSelectionParams(
+        language_code="el-GR",
+        name=voice
+    )
 
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            audio_data.write(chunk["data"])
+    # Select the type of audio file you want returned
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3
+    )
 
-    # Reset pointer to beginning of the stream
-    audio_data.seek(0)
+    # Perform the text-to-speech request on the text input with the selected
+    # voice parameters and audio file type
+    response = await client.synthesize_speech(
+        input=synthesis_input, voice=voice_params, audio_config=audio_config
+    )
 
     # Encode to base64
-    base64_audio = base64.b64encode(audio_data.read()).decode("utf-8")
+    base64_audio = base64.b64encode(response.audio_content).decode("utf-8")
 
     return base64_audio

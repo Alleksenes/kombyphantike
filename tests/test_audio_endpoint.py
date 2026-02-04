@@ -1,13 +1,36 @@
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
-# Mock heavy dependencies to avoid import errors and slow loading
+# Mock heavy dependencies
 sys.modules["pandas"] = MagicMock()
 sys.modules["spacy"] = MagicMock()
 sys.modules["sentence_transformers"] = MagicMock()
-sys.modules["google"] = MagicMock()
 sys.modules["google.genai"] = MagicMock()
 sys.modules["google.genai.types"] = MagicMock()
+
+# Mock google.cloud.texttospeech specifically
+mock_tts = MagicMock()
+mock_cloud = MagicMock()
+mock_cloud.texttospeech = mock_tts
+sys.modules["google.cloud"] = mock_cloud
+sys.modules["google.cloud.texttospeech"] = mock_tts
+sys.modules["google"] = MagicMock()
+
+# Setup the Client mock to return a response with bytes
+mock_client_instance = MagicMock()
+mock_tts.TextToSpeechAsyncClient.return_value = mock_client_instance
+
+mock_response = MagicMock()
+mock_response.audio_content = b"fake_mp3_bytes"
+
+# Async method needs AsyncMock
+mock_client_instance.synthesize_speech = AsyncMock(return_value=mock_response)
+
+# Setup constants
+mock_tts.SynthesisInput = MagicMock()
+mock_tts.VoiceSelectionParams = MagicMock()
+mock_tts.AudioConfig = MagicMock()
+mock_tts.AudioEncoding.MP3 = "MP3"
 
 # Mock src.kombyphantike module
 mock_engine_module = MagicMock()
@@ -36,18 +59,23 @@ def test_speak_endpoint():
     json_response = response.json()
     assert "audio_data" in json_response
 
-    # Assert Base64 validity
+    # Verify call arguments
+    # Note: since get_client is global, it might be called multiple times or cached.
+    # We verify that synthesize_speech was called on our mock instance.
+    mock_client_instance.synthesize_speech.assert_called_once()
+
+    # Check that the voice param was set correctly
+    call_args = mock_client_instance.synthesize_speech.call_args
+    _, kwargs = call_args
+
+    # Let's check VoiceSelectionParams call
+    mock_tts.VoiceSelectionParams.assert_called_with(
+        language_code="el-GR",
+        name="el-GR-Wavenet-A"
+    )
+
+    # Assert Base64 validity of the returned fake data
     data_uri = json_response["audio_data"]
-    assert isinstance(data_uri, str)
-    assert data_uri.startswith("data:audio/mp3;base64,")
-
     b64_str = data_uri.split(",")[1]
-    assert len(b64_str) > 0
-
-    # Try decoding to check if it's valid base64
-    try:
-        decoded = base64.b64decode(b64_str)
-        # Check if it looks like an MP3
-        assert len(decoded) > 0
-    except Exception as e:
-        assert False, f"Failed to decode base64 audio: {e}"
+    decoded = base64.b64decode(b64_str)
+    assert decoded == b"fake_mp3_bytes"
