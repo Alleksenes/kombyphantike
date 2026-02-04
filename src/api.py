@@ -186,6 +186,9 @@ def fill_curriculum(request: FillRequest):
                 )
                 if greek_text:
                     row["target_tokens"] = engine.tokenize_text(greek_text, "el")
+                    row["target_transliteration"] = engine.transliterate_sentence(
+                        greek_text
+                    )
 
                 # Tokenize English (Optional)
                 eng_text = row.get("source_sentence") or row.get("Source Sentence")

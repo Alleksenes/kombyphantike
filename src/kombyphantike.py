@@ -34,6 +34,29 @@ PROGRESS_FILE = DATA_DIR / "user_progress.json"
 SESSION_FILE = DATA_DIR / "current_session.json"
 PARADIGMS_PATH = PROCESSED_DIR / "paradigms.json"
 
+MORPH_MAP = {
+    "Nom": "Nominative",
+    "Gen": "Genitive",
+    "Acc": "Accusative",
+    "Voc": "Vocative",
+    "Masc": "Masculine",
+    "Fem": "Feminine",
+    "Neut": "Neuter",
+    "Sing": "Singular",
+    "Plur": "Plural",
+    "Pres": "Present",
+    "Past": "Past",
+    "Fut": "Future",
+    "Act": "Active",
+    "Pass": "Passive",
+    "Ind": "Indicative",
+    "Imp": "Imperative",
+    "Sub": "Subjunctive",
+    "Fin": "Finite",
+    "Inf": "Infinitive",
+    "Part": "Participle",
+}
+
 
 class KombyphantikeEngine:
     def __init__(self):
@@ -153,6 +176,18 @@ class KombyphantikeEngine:
             logger.warning(f"Paradigms file not found at {PARADIGMS_PATH}")
             return {}
 
+    def transliterate_sentence(self, text: str) -> str:
+        """
+        Generates full Latin transliteration for a given Greek sentence.
+        """
+        if not text:
+            return ""
+        try:
+            return translit(text, "el", reversed=True)
+        except Exception:
+            # Fallback if transliteration fails or language not supported
+            return text
+
     def _tokenize(self, text: str, lang: str) -> list:
         """
         Helper: Tokenizes text into structured objects.
@@ -169,6 +204,17 @@ class KombyphantikeEngine:
         doc = model(text)
         tokens = []
         for token in doc:
+            # Process Morphology
+            morph_dict = {}
+            if hasattr(token.morph, "to_dict"):
+                raw_morph = token.morph.to_dict()
+                for k, v in raw_morph.items():
+                    # Expand values if in map, else keep original
+                    morph_dict[k] = MORPH_MAP.get(v, v)
+            else:
+                # Fallback for older Spacy versions
+                morph_dict = {"raw": str(token.morph)}
+
             token_dict = {
                 "text": token.text,
                 "lemma": token.lemma_,
@@ -176,7 +222,7 @@ class KombyphantikeEngine:
                 "tag": token.tag_,
                 "dep": token.dep_,
                 "is_alpha": token.is_alpha,
-                "morphology": str(token.morph),
+                "morphology": morph_dict,
                 "transliteration": translit(token.text, "el", reversed=True)
                 if lang in ["el", "greek"]
                 else token.text,
@@ -552,6 +598,7 @@ class KombyphantikeEngine:
                 row = {
                     "source_sentence": "",
                     "target_sentence": "",
+                    "target_transliteration": "",
                     "knot_id": knot["Knot_ID"],
                     "parent_concept": knot["Parent_Concept"],
                     "nuance": knot["Nuance"],
