@@ -1,27 +1,33 @@
 import io
 import base64
+import os
+from elevenlabs.client import AsyncElevenLabs
 
-async def generate_audio(text: str, voice: str = "el-GR-AthinaNeural") -> str:
+async def generate_audio(text: str, voice: str = "Clyde") -> str:
     """
-    Generates audio from text using Microsoft Edge TTS and returns it as a Base64 string.
+    Generates audio from text using ElevenLabs and returns it as a Base64 string.
     """
-    try:
-        import edge_tts
-    except ImportError:
-        raise ImportError(
-            "The 'edge_tts' module is required for audio generation. "
-            "Please install it using 'pip install edge-tts'."
-        )
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not api_key:
+         raise ValueError("ELEVENLABS_API_KEY environment variable not set")
 
-    communicate = edge_tts.Communicate(text, voice)
+    client = AsyncElevenLabs(api_key=api_key)
 
+    # Generate audio
+    # The return type of client.generate is an AsyncIterator[bytes] when stream=True
+    audio_stream = await client.generate(
+        text=text,
+        voice=voice,
+        model="eleven_multilingual_v2",
+        stream=True
+    )
+
+    # Collect bytes
     audio_data = io.BytesIO()
+    async for chunk in audio_stream:
+        audio_data.write(chunk)
 
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            audio_data.write(chunk["data"])
-
-    # Reset pointer to beginning of the stream
+    # Reset pointer
     audio_data.seek(0)
 
     # Encode to base64
