@@ -205,6 +205,7 @@ def fill_curriculum(request: FillRequest):
 @app.post("/speak")
 async def speak(request: SpeakRequest):
     try:
+        # Calls ElevenLabs via src.audio
         audio_base64 = await generate_audio(request.text)
         return {"audio_data": f"data:audio/mp3;base64,{audio_base64}"}
     except Exception as e:
