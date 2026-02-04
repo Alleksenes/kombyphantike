@@ -25,6 +25,7 @@ grc-odycy-joint-sm = {path = "./data/grc_odycy_joint_sm-0.1.0-py3-none-any.whl"}
 streamlit = "^1.52.2"
 poetry-plugin-export = "^1.9.0"
 deep-translator = "^1.11.4"
+transliterate = "^1.10.2"
 tqdm = "^4.67.1"
 edge-tts = "^6.1.10"
 fastapi = "^0.109.0"

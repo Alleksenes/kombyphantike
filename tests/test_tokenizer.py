@@ -27,6 +27,8 @@ class TestTokenizer(unittest.TestCase):
         self.assertIn('tag', t0)
         self.assertIn('dep', t0)
         self.assertIn('is_alpha', t0)
+        self.assertIn('morphology', t0)
+        self.assertIn('transliteration', t0)
         self.assertTrue(t0['is_alpha']) # "Το" is alpha
 
         # Check punctuation "."
