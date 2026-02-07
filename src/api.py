@@ -207,6 +207,9 @@ def fill_curriculum(request: FillRequest):
 
 @app.post("/speak")
 async def speak(request: SpeakRequest):
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
     try:
         # Calls ElevenLabs via src.audio
         audio_base64 = await generate_audio(request.text)

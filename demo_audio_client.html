@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kombyphantike Audio Inspector Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #f0f2f5;
+            color: #333;
+        }
+        .inspector-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #2c3e50;
+        }
+        .word-display {
+            font-size: 2rem;
+            font-weight: bold;
+            margin: 1rem 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .speaker-icon {
+            cursor: pointer;
+            font-size: 1.5rem;
+            color: #3498db;
+            transition: color 0.2s;
+        }
+        .speaker-icon:hover {
+            color: #2980b9;
+        }
+        .input-group {
+            margin-top: 1.5rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+        input {
+            padding: 0.5rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            flex-grow: 1;
+        }
+        button {
+            padding: 0.5rem 1rem;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .loading {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .error-msg {
+            color: #e74c3c;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="inspector-card">
+    <h1>Inspector Audio Demo</h1>
+    <p>Test audio playback for words/sentences.</p>
+
+    <div class="word-display">
+        <span id="currentWord">άνθρωπος</span>
+        <span class="speaker-icon" onclick="playAudio()">🔊</span>
+        <div class="loading" id="spinner"></div>
+    </div>
+
+    <div class="input-group">
+        <input type="text" id="textInput" value="άνθρωπος" placeholder="Enter Greek text...">
+        <button onclick="updateWord()">Update</button>
+    </div>
+
+    <div id="errorMsg" class="error-msg"></div>
+</div>
+
+<script>
+    const API_URL = "http://localhost:8000/speak";
+
+    function updateWord() {
+        const input = document.getElementById('textInput').value;
+        if(input.trim()) {
+            document.getElementById('currentWord').textContent = input;
+            document.getElementById('errorMsg').textContent = '';
+        }
+    }
+
+    async function playAudio() {
+        const text = document.getElementById('currentWord').textContent;
+        const spinner = document.getElementById('spinner');
+        const icon = document.querySelector('.speaker-icon');
+        const errorMsg = document.getElementById('errorMsg');
+
+        // Reset UI
+        errorMsg.textContent = '';
+        icon.style.display = 'none';
+        spinner.style.display = 'block';
+
+        try {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ text: text })
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.detail || 'Network response was not ok');
+            }
+
+            const data = await response.json();
+            const audioData = data.audio_data; // "data:audio/mp3;base64,..."
+
+            const audio = new Audio(audioData);
+            await audio.play();
+
+        } catch (error) {
+            console.error('Error playing audio:', error);
+            errorMsg.textContent = `Error: ${error.message}`;
+        } finally {
+            spinner.style.display = 'none';
+            icon.style.display = 'block';
+        }
+    }
+</script>
+
+</body>
+</html>
