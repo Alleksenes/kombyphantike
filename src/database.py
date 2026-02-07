@@ -34,6 +34,45 @@ class DatabaseManager:
             rows = cursor.fetchall()
 
             if not rows:
+                # Check relations table: SELECT parent_lemma_text FROM relations WHERE child_lemma_id = ? AND relation_type = 'form_of'.
+                query_rel = """
+                    SELECT r.parent_lemma_text
+                    FROM relations r
+                    JOIN lemmas l ON r.child_lemma_id = l.id
+                    WHERE l.lemma_text = ? AND r.relation_type = 'form_of'
+                """
+                cursor.execute(query_rel, (lemma,))
+                row_rel = cursor.fetchone()
+
+                if row_rel:
+                    parent_lemma = row_rel['parent_lemma_text']
+                    # Query forms for the Parent ID (via lemma text)
+                    cursor.execute(query, (parent_lemma,))
+                    rows = cursor.fetchall()
+
+                    if rows:
+                        paradigm = []
+                        for row in rows:
+                            tags = []
+                            if row['tags_json']:
+                                try:
+                                    tags = json.loads(row['tags_json'])
+                                except json.JSONDecodeError:
+                                    tags = []
+
+                            entry = {
+                                "form": row['form_text'],
+                                "tags": tags
+                            }
+
+                            # Verify if the original word exists in that paradigm and mark it as is_current_form: True.
+                            if row['form_text'] == lemma:
+                                entry['is_current_form'] = True
+
+                            paradigm.append(entry)
+
+                        return paradigm
+
                 return None
 
             paradigm = []

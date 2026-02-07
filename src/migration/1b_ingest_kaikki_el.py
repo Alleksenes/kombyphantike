@@ -124,6 +124,7 @@ def ingest_kaikki_el():
 
             # Greek Def: from senses glosses
             greek_defs = []
+            form_of_parents = set()
             for s in entry.get("senses", []):
                 # 1. Capture Definition
                 glosses = s.get("glosses", [])
@@ -136,13 +137,7 @@ def ingest_kaikki_el():
                     for parent in s["form_of"]:
                         parent_word = parent.get("word")
                         if parent_word:
-                            cursor.execute(
-                                """
-                                INSERT INTO relations (child_lemma_id, parent_lemma_text, relation_type)
-                                VALUES (?, ?, ?)
-                                """,
-                                (lemma_id, parent_word, "form_of"),
-                            )
+                            form_of_parents.add(parent_word)
 
             greek_def = " || ".join(greek_defs) if greek_defs else None
 
@@ -161,6 +156,16 @@ def ingest_kaikki_el():
             if not res:
                 continue
             lemma_id = res[0]
+
+            # Insert Form Of Relations
+            for parent_word in form_of_parents:
+                cursor.execute(
+                    """
+                    INSERT INTO relations (child_lemma_id, parent_lemma_text, relation_type)
+                    VALUES (?, ?, ?)
+                    """,
+                    (lemma_id, parent_word, "form_of"),
+                )
 
             # Forms
             for form in entry.get("forms", []):
