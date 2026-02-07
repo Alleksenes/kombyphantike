@@ -1,3 +1,4 @@
+from transliterate import translit
 import pandas as pd
 import spacy
 import csv
@@ -14,7 +15,6 @@ from collections import Counter
 from src.config import PROCESSED_DIR, DATA_DIR
 from src.knot_loader import KnotLoader
 from src.database import DatabaseManager
-from transliterate import translit
 
 # Suppress warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -141,16 +141,17 @@ class KombyphantikeEngine:
                 except:
                     print("Spacy missing. Semantic search will be degraded.")
 
-    def transliterate_sentence(self, text: str) -> str:
+   def transliterate_sentence(self, text: str) -> str:
         """
-        Generates full Latin transliteration for a given Greek sentence.
+        Helper to transliterate a full Greek sentence to Latin characters.
         """
         if not text:
             return ""
         try:
+            # "el" is the language code for Greek
             return translit(text, "el", reversed=True)
-        except Exception:
-            # Fallback if transliteration fails or language not supported
+        except Exception as e:
+            print(f"Transliteration Error: {e}")
             return text
 
     def _tokenize(self, text: str, lang: str) -> list:
