@@ -1,36 +1,43 @@
-import io
-import base64
 import os
-from elevenlabs.client import AsyncElevenLabs
+import logging
+import base64
+from elevenlabs.client import ElevenLabs
 
-async def generate_audio(text: str, voice: str = "Clyde") -> str:
+logger = logging.getLogger("audio")
+
+
+def generate_audio(text: str) -> str:
     """
-    Generates audio from text using ElevenLabs and returns it as a Base64 string.
+    Generates audio using the ElevenLabs v1.0+ SDK and returns a Base64 Data URI.
     """
     api_key = os.getenv("ELEVENLABS_API_KEY")
     if not api_key:
-         raise ValueError("ELEVENLABS_API_KEY environment variable not set")
+        logger.error("ELEVENLABS_API_KEY not found in environment variables.")
+        raise ValueError("ElevenLabs API Key is missing.")
 
-    client = AsyncElevenLabs(api_key=api_key)
+    try:
+        # Initialize Client
+        client = ElevenLabs(api_key=api_key)
 
-    # Generate audio
-    # The return type of client.generate is an AsyncIterator[bytes] when stream=True
-    audio_stream = await client.generate(
-        text=text,
-        voice=voice,
-        model="eleven_multilingual_v2",
-        stream=True
-    )
+        # Generate Audio (Returns an iterator)
+        audio_stream = client.text_to_speech.convert(
+            text=text,
+            voice_id="21m00Tcm4TlvDq8ikWAM",  # "Rachel" (Default) - Change to a Greek voice ID if you have one
+            model_id="eleven_multilingual_v2",
+            output_format="mp3_44100_128",
+        )
 
-    # Collect bytes
-    audio_data = io.BytesIO()
-    async for chunk in audio_stream:
-        audio_data.write(chunk)
+        # Consume stream
+        audio_bytes = b"".join(audio_stream)
 
-    # Reset pointer
-    audio_data.seek(0)
+        # Encode
+        audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
 
-    # Encode to base64
-    base64_audio = base64.b64encode(audio_data.read()).decode("utf-8")
+        return f"data:audio/mp3;base64,{audio_base64}"
 
-    return base64_audio
+    except Exception as e:
+        logger.error(f"ElevenLabs generation failed: {e}")
+        # Detailed logging for debugging
+        if hasattr(e, "body"):
+            logger.error(f"API Response: {e.body}")
+        raise e
