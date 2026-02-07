@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import sys
@@ -16,13 +17,91 @@ except ImportError:
 
 DB_PATH = Path("data/processed/kombyphantike_v2.db")
 XML_DIR = Path("data/dictionaries/lsj_xml")
+POET_AUTHORS = ["Sophocles", "Homer"]
+
 
 def strip_ns(tag):
     if '}' in tag:
         return tag.split('}', 1)[1]
     return tag
 
-def get_definition_text(elem):
+
+def clean_definition_text(text, converter):
+    if not text:
+        return ""
+
+    # 1. Regex Cleanup
+    # Remove "c. gen.", "c. acc.", "folld. by", "cf." (case insensitive)
+    text = re.sub(r'\bc\. gen\.\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bc\. acc\.\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bfolld\. by\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bcf\.\s*', '', text, flags=re.IGNORECASE)
+
+    # Clean multiple semicolons
+    text = re.sub(r';+', ';', text)
+
+    # 2. Beta Code Detection
+    # If text contains /, =, \, |, run through converter token-wise to avoid garbling English
+    tokens = re.split(r'(\s+)', text)
+    processed_tokens = []
+    for token in tokens:
+        if re.search(r'[\\/=\\|]', token):
+            processed_tokens.append(converter.to_greek(token))
+        else:
+            processed_tokens.append(token)
+
+    text = "".join(processed_tokens)
+
+    # Collapse multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+
+    return text.strip()
+
+
+def process_citation(cit_node, converter):
+    cit_obj = {}
+
+    # Extract fields
+    for child in cit_node:
+        tag = strip_ns(child.tag)
+        text_val = child.text.strip() if child.text else ""
+        if not text_val:
+            continue
+
+        if tag == 'author':
+            cit_obj['author'] = text_val
+        elif tag in ('work', 'title'):
+            cit_obj['work'] = text_val
+        elif tag in ('quote', 'q', 'text'):
+            # Rename 'text' to 'greek' as requested
+            cit_obj['greek'] = clean_definition_text(text_val, converter)
+        elif tag in ('translation', 'tr'):
+            cit_obj['translation'] = text_val
+        elif tag == 'bibl':
+            # Handle nested bibl
+            for bibl_child in child:
+                bibl_tag = strip_ns(bibl_child.tag)
+                bibl_text = bibl_child.text.strip() if bibl_child.text else ""
+                if not bibl_text: continue
+                if bibl_tag == 'author':
+                    cit_obj['author'] = bibl_text
+                elif bibl_tag == 'title':
+                    cit_obj['work'] = bibl_text
+
+    # Jewel Selection Logic
+    has_translation = 'translation' in cit_obj and cit_obj['translation']
+    author = cit_obj.get('author')
+    is_poet = author in POET_AUTHORS
+
+    if has_translation:
+        return cit_obj
+    elif is_poet:
+        return cit_obj
+    else:
+        return None
+
+
+def get_definition_text(elem, converter):
     text_content = []
     if elem.text:
         text_content.append(elem.text.strip())
@@ -36,14 +115,16 @@ def get_definition_text(elem):
             continue
 
         # Recurse for other tags to get their text
-        sub_text = get_definition_text(child)
+        sub_text = get_definition_text(child, converter)
         if sub_text:
             text_content.append(sub_text)
 
         if child.tail:
             text_content.append(child.tail.strip())
 
-    return " ".join(filter(None, text_content))
+    combined_text = " ".join(filter(None, text_content))
+    return clean_definition_text(combined_text, converter)
+
 
 def ingest_lsj():
     if not XML_DIR.exists():
@@ -117,7 +198,7 @@ def ingest_lsj():
                 for sense in sense_nodes:
                     sense_id = sense.get('id') or sense.get('n')
 
-                    definition = get_definition_text(sense)
+                    definition = get_definition_text(sense, converter)
 
                     citations = []
                     cit_nodes = []
@@ -126,32 +207,7 @@ def ingest_lsj():
                             cit_nodes.append(child)
 
                     for cit in cit_nodes:
-                        cit_obj = {}
-                        for child in cit:
-                            tag = strip_ns(child.tag)
-                            text_val = child.text.strip() if child.text else ""
-                            if not text_val:
-                                continue
-
-                            if tag == 'author':
-                                cit_obj['author'] = text_val
-                            elif tag in ('work', 'title'):
-                                cit_obj['work'] = text_val
-                            elif tag in ('quote', 'q', 'text'):
-                                cit_obj['text'] = text_val
-                            elif tag in ('translation', 'tr'):
-                                cit_obj['translation'] = text_val
-                            elif tag == 'bibl':
-                                # bibl might contain author/work
-                                for bibl_child in child:
-                                    bibl_tag = strip_ns(bibl_child.tag)
-                                    bibl_text = bibl_child.text.strip() if bibl_child.text else ""
-                                    if not bibl_text: continue
-                                    if bibl_tag == 'author':
-                                        cit_obj['author'] = bibl_text
-                                    elif bibl_tag == 'title':
-                                        cit_obj['work'] = bibl_text
-
+                        cit_obj = process_citation(cit, converter)
                         if cit_obj:
                             citations.append(cit_obj)
 
