@@ -13,6 +13,66 @@ class DatabaseManager:
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
+    def _synthesize_tags(self, tags: list) -> list:
+        """
+        Injects normalized/synthesized tags to help frontend parsing.
+        Example: ["first-person"] -> ["first-person", "1"]
+        Example: ["past", "perfective"] -> ["past", "perfective", "Aorist"]
+        """
+        syn_tags = set(tags)
+
+        # 1. Person
+        if "first-person" in tags:
+            syn_tags.add("1")
+            syn_tags.add("1st")
+        if "second-person" in tags:
+            syn_tags.add("2")
+            syn_tags.add("2nd")
+        if "third-person" in tags:
+            syn_tags.add("3")
+            syn_tags.add("3rd")
+
+        # 2. Number
+        if "singular" in tags:
+            syn_tags.add("Singular")
+        if "plural" in tags:
+            syn_tags.add("Plural")
+
+        # 3. Voice
+        if "active" in tags:
+            syn_tags.add("Active")
+        if "passive" in tags:
+            syn_tags.add("Passive")
+        if "mediopassive" in tags:
+            syn_tags.add("Mediopassive")
+
+        # 4. Tense / Aspect Synthesis
+        # "Present" is usually "present" tag
+        if "present" in tags:
+            syn_tags.add("Present")
+
+        # "Future"
+        if "future" in tags:
+            syn_tags.add("Future")
+
+        # "Imperfect" = Past + Imperfective
+        if "past" in tags and "imperfective" in tags:
+            syn_tags.add("Imperfect")
+
+        # "Aorist" = Past + Perfective
+        if "past" in tags and "perfective" in tags:
+            syn_tags.add("Aorist")
+
+        # "Perfect"
+        if "perfect" in tags:
+            syn_tags.add("Perfect")
+
+        # "Pluperfect"
+        if "pluperfect" in tags:
+            syn_tags.add("Pluperfect")
+
+        return sorted(list(syn_tags))
+
     def get_paradigm(self, lemma):
         """
         Retrieves paradigm. Follows 'form_of' links recursively.
@@ -57,6 +117,7 @@ class DatabaseManager:
             paradigm = []
             for r in rows:
                 tags = json.loads(r["tags_json"]) if r["tags_json"] else []
+                tags = self._synthesize_tags(tags)
                 entry = {"form": r["form_text"], "tags": tags}
                 # Highlight logic: If this form matches our input word
                 if r["form_text"] == lemma:
