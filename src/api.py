@@ -178,6 +178,22 @@ def fill_curriculum(request: FillRequest):
         filled_rows = call_gemini(full_prompt)
 
         if isinstance(filled_rows, list):
+            # --- MERGE & RESTORE STATIC DATA ---
+            # Ensure we don't lose static fields (like knot_definition) if AI dropped them
+            # We assume order is preserved (1:1 mapping) as instructed in prompt
+            if len(filled_rows) == len(request.worksheet_data):
+                for i, row in enumerate(filled_rows):
+                    original = request.worksheet_data[i]
+                    # Restore critical static fields if missing
+                    # We can iterate over original keys and ensure they exist in new row
+                    for key, val in original.items():
+                        if key not in row:
+                            row[key] = val
+            else:
+                logger.warning(
+                    f"Row count mismatch: AI returned {len(filled_rows)}, expected {len(request.worksheet_data)}. Merging disabled to prevent data corruption."
+                )
+
             # --- THE TOKENIZATION INJECTION ---
             for row in filled_rows:
                 # Tokenize Greek
