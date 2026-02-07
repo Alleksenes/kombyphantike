@@ -21,8 +21,8 @@ POET_AUTHORS = ["Sophocles", "Homer"]
 
 
 def strip_ns(tag):
-    if '}' in tag:
-        return tag.split('}', 1)[1]
+    if "}" in tag:
+        return tag.split("}", 1)[1]
     return tag
 
 
@@ -32,20 +32,20 @@ def clean_definition_text(text, converter):
 
     # 1. Regex Cleanup
     # Remove "c. gen.", "c. acc.", "folld. by", "cf." (case insensitive)
-    text = re.sub(r'\bc\. gen\.\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\bc\. acc\.\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\bfolld\. by\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\bcf\.\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r"\bc\. gen\.\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bc\. acc\.\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bfolld\. by\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bcf\.\s*", "", text, flags=re.IGNORECASE)
 
     # Clean multiple semicolons
-    text = re.sub(r';+', ';', text)
+    text = re.sub(r";+", ";", text)
 
     # 2. Beta Code Detection
     # If text contains /, =, \, |, run through converter token-wise to avoid garbling English
-    tokens = re.split(r'(\s+)', text)
+    tokens = re.split(r"(\s+)", text)
     processed_tokens = []
     for token in tokens:
-        if re.search(r'[\\/=\\|]', token):
+        if re.search(r"[\\/=\\|]", token):
             processed_tokens.append(converter.to_greek(token))
         else:
             processed_tokens.append(token)
@@ -53,7 +53,7 @@ def clean_definition_text(text, converter):
     text = "".join(processed_tokens)
 
     # Collapse multiple spaces
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r"\s+", " ", text)
 
     return text.strip()
 
@@ -68,29 +68,30 @@ def process_citation(cit_node, converter):
         if not text_val:
             continue
 
-        if tag == 'author':
-            cit_obj['author'] = text_val
-        elif tag in ('work', 'title'):
-            cit_obj['work'] = text_val
-        elif tag in ('quote', 'q', 'text'):
+        if tag == "author":
+            cit_obj["author"] = text_val
+        elif tag in ("work", "title"):
+            cit_obj["work"] = text_val
+        elif tag in ("quote", "q", "text"):
             # Rename 'text' to 'greek' as requested
-            cit_obj['greek'] = clean_definition_text(text_val, converter)
-        elif tag in ('translation', 'tr'):
-            cit_obj['translation'] = text_val
-        elif tag == 'bibl':
+            cit_obj["greek"] = clean_definition_text(text_val, converter)
+        elif tag in ("translation", "tr"):
+            cit_obj["translation"] = text_val
+        elif tag == "bibl":
             # Handle nested bibl
             for bibl_child in child:
                 bibl_tag = strip_ns(bibl_child.tag)
                 bibl_text = bibl_child.text.strip() if bibl_child.text else ""
-                if not bibl_text: continue
-                if bibl_tag == 'author':
-                    cit_obj['author'] = bibl_text
-                elif bibl_tag == 'title':
-                    cit_obj['work'] = bibl_text
+                if not bibl_text:
+                    continue
+                if bibl_tag == "author":
+                    cit_obj["author"] = bibl_text
+                elif bibl_tag == "title":
+                    cit_obj["work"] = bibl_text
 
     # Jewel Selection Logic
-    has_translation = 'translation' in cit_obj and cit_obj['translation']
-    author = cit_obj.get('author')
+    has_translation = "translation" in cit_obj and cit_obj["translation"]
+    author = cit_obj.get("author")
     is_poet = author in POET_AUTHORS
 
     if has_translation:
@@ -108,7 +109,7 @@ def get_definition_text(elem, converter):
 
     for child in elem:
         tag_name = strip_ns(child.tag)
-        if tag_name == 'cit':
+        if tag_name == "cit":
             # Skip citation content in definition, but keep tail text
             if child.tail:
                 text_content.append(child.tail.strip())
@@ -139,14 +140,16 @@ def ingest_lsj():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    cursor.execute("""
+    cursor.execute(
+        """
     CREATE TABLE IF NOT EXISTS lsj_entries (
         id INTEGER PRIMARY KEY,
         canonical_key TEXT UNIQUE, -- Stripped beta code (e.g. 'prostatew')
         headword TEXT, -- Original Greek form
         entry_json TEXT -- The structured tree
     );
-    """)
+    """
+    )
     conn.commit()
 
     files = list(XML_DIR.glob("*.xml"))
@@ -160,21 +163,21 @@ def ingest_lsj():
             # Find all entryFree.
             entries = []
             for elem in root.iter():
-                if strip_ns(elem.tag) == 'entryFree':
+                if strip_ns(elem.tag) == "entryFree":
                     entries.append(elem)
 
             for entry in entries:
                 # headword
-                headword = entry.get('headword')
+                headword = entry.get("headword")
                 if not headword:
                     # try <orth> child
                     for child in entry:
-                         if strip_ns(child.tag) == 'orth':
-                             headword = child.text
-                             break
+                        if strip_ns(child.tag) == "orth":
+                            headword = child.text
+                            break
 
                 # key
-                key_attr = entry.get('key')
+                key_attr = entry.get("key")
                 canonical_key = ""
 
                 if key_attr:
@@ -192,18 +195,18 @@ def ingest_lsj():
                 # Find all sense tags within this entry
                 sense_nodes = []
                 for child in entry.iter():
-                    if strip_ns(child.tag) == 'sense':
+                    if strip_ns(child.tag) == "sense":
                         sense_nodes.append(child)
 
                 for sense in sense_nodes:
-                    sense_id = sense.get('id') or sense.get('n')
+                    sense_id = sense.get("id") or sense.get("n")
 
                     definition = get_definition_text(sense, converter)
 
                     citations = []
                     cit_nodes = []
                     for child in sense.iter():
-                        if strip_ns(child.tag) == 'cit':
+                        if strip_ns(child.tag) == "cit":
                             cit_nodes.append(child)
 
                     for cit in cit_nodes:
@@ -211,27 +214,34 @@ def ingest_lsj():
                         if cit_obj:
                             citations.append(cit_obj)
 
-                    senses_list.append({
-                        "id": sense_id,
-                        "definition": definition,
-                        "citations": citations
-                    })
+                    senses_list.append(
+                        {
+                            "id": sense_id,
+                            "definition": definition,
+                            "citations": citations,
+                        }
+                    )
 
-                entry_data = {
-                    "headword": headword,
-                    "senses": senses_list
-                }
+                entry_data = {"headword": headword, "senses": senses_list}
 
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT OR REPLACE INTO lsj_entries (canonical_key, headword, entry_json)
                     VALUES (?, ?, ?)
-                """, (canonical_key, headword, json.dumps(entry_data, ensure_ascii=False)))
+                """,
+                    (
+                        canonical_key,
+                        headword,
+                        json.dumps(entry_data, ensure_ascii=False),
+                    ),
+                )
 
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
 
     conn.commit()
     conn.close()
+
 
 if __name__ == "__main__":
     ingest_lsj()

@@ -1,147 +1,145 @@
 import sqlite3
 import json
-import sys
 import logging
+import sys
 from pathlib import Path
-
-try:
-    from tqdm import tqdm
-except ImportError:
-    def tqdm(iterable, desc=None):
-        return iterable
+from tqdm import tqdm
 
 # Add project root to path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-
-from src.beta_code import BetaCodeConverter
 from src.config import PROCESSED_DIR
+from src.beta_code import BetaCodeConverter
 
-# Database Path
 DB_PATH = PROCESSED_DIR / "kombyphantike_v2.db"
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-def extract_ancient_word(etymology_json_str):
+def extract_ancient_root(etym_json):
     """
-    Parses etymology JSON to find the Ancient Greek source word.
-    Supports both:
-    1. User-specified format: [{'source': 'grc', 'word': '...'}]
-    2. Standard Kaikki/Wiktionary template structure: {'args': {'1': 'el', '2': 'grc', '3': 'word'}, ...}
+    Parses kaikki-el etymology templates to find the Ancient Greek root.
+    Target templates: 'κληρονομημένο' (inherited), 'ετυμ' (etymology), 'δάνειο' (loan).
     """
+    if not etym_json:
+        return None
+
     try:
-        data = json.loads(etymology_json_str)
-    except (json.JSONDecodeError, TypeError):
+        templates = json.loads(etym_json)
+    except:
         return None
 
-    if not isinstance(data, list):
-        return None
+    for t in templates:
+        name = t.get("name", "")
+        args = t.get("args", {})
 
-    for item in data:
-        if not isinstance(item, dict):
-            continue
+        # Check for Ancient Greek source ('grc')
+        # Templates usually look like: {{κληρονομημένο|el|grc|λόγος}}
+        # args: {'1': 'el', '2': 'grc', '3': 'λόγος'}
 
-        # Strategy 1: User specified format
-        if item.get("source") == "grc" and item.get("word"):
-            return item["word"]
+        source_lang = None
+        root_word = None
 
-        # Strategy 2: Kaikki template format
-        # Check if 'grc' is in args
-        args = item.get("args", {})
-        if not args:
-            continue
+        # Scan positional args for 'grc'
+        for key, val in args.items():
+            if val == "grc":
+                source_lang = "grc"
+                # The word is usually the NEXT argument
+                # If 'grc' is at '2', word is at '3'.
+                try:
+                    next_key = str(int(key) + 1)
+                    root_word = args.get(next_key)
+                except:
+                    pass
+                break
 
-        # Values in args are strings. Keys are usually "1", "2", "3" etc.
-        # We look for value == "grc" which indicates source language.
-        is_ancient_source = False
-        word_candidate = None
-
-        for k, v in args.items():
-            if v == "grc":
-                is_ancient_source = True
-
-        if is_ancient_source:
-            # The word is usually in position 3 (if 'el' is 1 and 'grc' is 2)
-            # Or just look for the first non-code argument
-            word_candidate = args.get("3")
-            if not word_candidate:
-                # Fallback: look for other args that are not 'el' or 'grc'
-                for k, v in args.items():
-                    if v not in ["el", "grc"] and k not in ["1", "2"]:
-                        word_candidate = v
-                        break
-
-        if is_ancient_source and word_candidate:
-            return word_candidate
+        if source_lang == "grc" and root_word:
+            return root_word
 
     return None
 
-def link_etymologies():
-    if not DB_PATH.exists():
-        logging.error(f"Database not found at {DB_PATH}")
-        return
 
-    logging.info("Connecting to database...")
+def link_etymologies():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    converter = BetaCodeConverter()
 
-    # Add lsj_id column if not exists
-    try:
-        cursor.execute("ALTER TABLE lemmas ADD COLUMN lsj_id INTEGER REFERENCES lsj_entries(id)")
-        logging.info("Added 'lsj_id' column to 'lemmas'.")
-    except sqlite3.OperationalError:
-        logging.info("'lsj_id' column already exists.")
+    # 1. Prepare LSJ Cache (Target)
+    logging.info("Loading LSJ keys into memory...")
+    cursor.execute("SELECT id, canonical_key, headword FROM lsj_entries")
+    lsj_cache = {}
 
-    logging.info("Loading Beta Code Converter...")
-    try:
-        converter = BetaCodeConverter()
-    except FileNotFoundError as e:
-        logging.error(f"Failed to load BetaCodeConverter: {e}")
-        conn.close()
-        return
+    for lid, key, head in cursor.fetchall():
+        # Store by canonical beta code key (e.g., 'prostatew')
+        if key:
+            lsj_cache[key] = lid
 
-    logging.info("Fetching lemmas with etymology...")
-    cursor.execute("SELECT id, etymology_json FROM lemmas WHERE etymology_json IS NOT NULL")
-    rows = cursor.fetchall()
+        # Also store by Normalized Unicode Headword (fallback)
+        # Ancient 'ἄνθρωπος' -> beta 'a)/nqrwpos' -> canonical 'anqrwpos'
+        if head:
+            try:
+                beta = converter.to_beta_code(head)
+                canon = converter.canonicalize(beta)
+                lsj_cache[canon] = lid
+            except:
+                pass
 
-    total = len(rows)
-    logging.info(f"Found {total} lemmas with etymology.")
+    # 2. Iterate Modern Lemmas (Source)
+    logging.info("Fetching Modern Lemmas...")
+    cursor.execute("SELECT id, lemma_text, etymology_json FROM lemmas")
+    lemmas = cursor.fetchall()
 
-    hit_count = 0
-    updates = []
+    logging.info(f"Weaving {len(lemmas)} words...")
 
-    for lemma_id, ety_json in tqdm(rows, desc="Linking Etymologies"):
-        ancient_word = extract_ancient_word(ety_json)
+    stats = {"etym_linked": 0, "direct_linked": 0, "failed": 0}
 
-        if not ancient_word:
-            continue
+    for lemma_id, text, etym_json in tqdm(lemmas):
+        target_lsj_id = None
 
-        # Convert to Beta Code and Canonicalize
-        beta = converter.to_beta_code(ancient_word)
-        canonical = converter.canonicalize(beta)
+        # STRATEGY A: The Philological Path (Parse Etymology)
+        root_word = extract_ancient_root(etym_json)
+        if root_word:
+            try:
+                # Convert the root (e.g. 'ὁμιλέω') to canonical key
+                beta = converter.to_beta_code(root_word)
+                canon = converter.canonicalize(beta)
+                if canon in lsj_cache:
+                    target_lsj_id = lsj_cache[canon]
+                    stats["etym_linked"] += 1
+            except:
+                pass
 
-        if not canonical:
-            continue
+        # STRATEGY B: The Direct Path (Fallback)
+        # If no etymology found, check if the word ITSELF exists in LSJ
+        # (e.g. 'άνθρωπος' -> 'ἄνθρωπος')
+        if not target_lsj_id:
+            try:
+                beta = converter.to_beta_code(text)
+                canon = converter.canonicalize(beta)
+                if canon in lsj_cache:
+                    target_lsj_id = lsj_cache[canon]
+                    stats["direct_linked"] += 1
+            except:
+                pass
 
-        # Find in LSJ
-        cursor.execute("SELECT id FROM lsj_entries WHERE canonical_key = ?", (canonical,))
-        result = cursor.fetchone()
+        # Update DB
+        if target_lsj_id:
+            cursor.execute(
+                "UPDATE lemmas SET lsj_id = ? WHERE id = ?", (target_lsj_id, lemma_id)
+            )
+        else:
+            stats["failed"] += 1
 
-        if result:
-            lsj_id = result[0]
-            updates.append((lsj_id, lemma_id))
-            hit_count += 1
-
-        if len(updates) >= 1000:
-            cursor.executemany("UPDATE lemmas SET lsj_id = ? WHERE id = ?", updates)
-            conn.commit()
-            updates = []
-
-    if updates:
-        cursor.executemany("UPDATE lemmas SET lsj_id = ? WHERE id = ?", updates)
-        conn.commit()
-
-    logging.info(f"Linked {hit_count} / {total} words.")
+    conn.commit()
     conn.close()
+
+    logging.info("--- WEAVING COMPLETE ---")
+    logging.info(f"Linked via Etymology: {stats['etym_linked']}")
+    logging.info(f"Linked via Direct Match: {stats['direct_linked']}")
+    logging.info(
+        f"Total Linked: {stats['etym_linked'] + stats['direct_linked']} / {len(lemmas)}"
+    )
+
 
 if __name__ == "__main__":
     link_etymologies()

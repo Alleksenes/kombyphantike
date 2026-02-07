@@ -10,33 +10,26 @@ logger = logging.getLogger(__name__)
 class DatabaseManager:
     def __init__(self):
         self.db_path = PROCESSED_DIR / "kombyphantike_v2.db"
-        if not self.db_path.exists():
-            logger.warning(
-                f"Database not found at {self.db_path}. Functionality may be limited."
-            )
-
-        # Connect to the database
-        # check_same_thread=False allows using the connection across threads (e.g., in FastAPI)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
     def get_paradigm(self, lemma):
         """
-        Retrieves the inflection paradigm for a given lemma.
-        Returns a list of dicts: [{'form': '...', 'tags': [...]}, ...]
+        Retrieves paradigm. Follows 'form_of' links recursively.
         """
         try:
-            # 1. Try Direct Lookup
             cursor = self.conn.cursor()
+
+            # 1. Find the Lemma ID (Direct)
             cursor.execute("SELECT id FROM lemmas WHERE lemma_text = ?", (lemma,))
-            result = cursor.fetchone()
+            row = cursor.fetchone()
 
             target_id = None
-            if result:
-                target_id = result[0]
+            if row:
+                target_id = row[0]
             else:
-                # 2. Try Lookup via Relations (The Soft Link)
-                # Find if this word is a form of another word
+                # 2. If not found, look for a PARENT (Soft Link)
+                # "ισχύει" is not a lemma, but it points to "ισχύω"
                 cursor.execute(
                     """
                     SELECT l.id 
@@ -47,84 +40,44 @@ class DatabaseManager:
                 """,
                     (lemma,),
                 )
-                parent_result = cursor.fetchone()
-                if parent_result:
-                    target_id = parent_result[0]  # Switch target to the Parent ID
+                parent_row = cursor.fetchone()
+                if parent_row:
+                    target_id = parent_row[0]
 
             if not target_id:
-                return None
+                return []  # Return empty list, not None, to prevent crashes
 
-            # 3. Fetch Forms for the Target ID (Child or Parent)
+            # 3. Fetch Forms for the Target
             cursor.execute(
                 "SELECT form_text, tags_json FROM forms WHERE lemma_id = ?",
                 (target_id,),
             )
             rows = cursor.fetchall()
 
-            if not rows:
-                # Check relations table: SELECT parent_lemma_text FROM relations WHERE child_lemma_id = ? AND relation_type = 'form_of'.
-                query_rel = """
-                    SELECT r.parent_lemma_text
-                    FROM relations r
-                    JOIN lemmas l ON r.child_lemma_id = l.id
-                    WHERE l.lemma_text = ? AND r.relation_type = 'form_of'
-                """
-                cursor.execute(query_rel, (lemma,))
-                row_rel = cursor.fetchone()
-
-                if row_rel:
-                    parent_lemma = row_rel["parent_lemma_text"]
-                    # Query forms for the Parent ID (via lemma text)
-                    cursor.execute(query_rel, (parent_lemma,))
-                    rows = cursor.fetchall()
-
-                    if rows:
-                        paradigm = []
-                        for row in rows:
-                            tags = []
-                            if row["tags_json"]:
-                                try:
-                                    tags = json.loads(row["tags_json"])
-                                except json.JSONDecodeError:
-                                    tags = []
-
-                            entry = {"form": row["form_text"], "tags": tags}
-
-                            # Verify if the original word exists in that paradigm and mark it as is_current_form: True.
-                            if row["form_text"] == lemma:
-                                entry["is_current_form"] = True
-
-                            paradigm.append(entry)
-
-                        return paradigm
-
-                return None
-
             paradigm = []
-            for row in rows:
-                tags = []
-                if row["tags_json"]:
-                    try:
-                        tags = json.loads(row["tags_json"])
-                    except json.JSONDecodeError:
-                        tags = []
-
-                paradigm.append({"form": row["form_text"], "tags": tags})
+            for r in rows:
+                tags = json.loads(r["tags_json"]) if r["tags_json"] else []
+                entry = {"form": r["form_text"], "tags": tags}
+                # Highlight logic: If this form matches our input word
+                if r["form_text"] == lemma:
+                    entry["is_current_form"] = True
+                paradigm.append(entry)
 
             return paradigm
-        except sqlite3.Error as e:
-            logger.error(f"Database error in get_paradigm: {e}")
-            return None
+
+        except Exception as e:
+            logger.error(f"DB Error in get_paradigm: {e}")
+            return []
 
     def get_metadata(self, lemma):
         """
-        Retrieves metadata for a given lemma, including POS, IPA, Etymology, and Ancient Context.
-        Returns a dict: { "pos": ..., "ipa": ..., "ancient_context": ..., "etymology": ... }
+        Fetches POS, IPA, Definitions (Greek/English), and Ancient Context (LSJ).
         """
         try:
             cursor = self.conn.cursor()
+            # Join Lemmas with LSJ Entries
             query = """
-                SELECT l.pos, l.ipa, l.etymology_json, lsj.entry_json
+                SELECT l.pos, l.ipa, l.greek_def, l.english_def, lsj.entry_json
                 FROM lemmas l
                 LEFT JOIN lsj_entries lsj ON l.lsj_id = lsj.id
                 WHERE l.lemma_text = ?
@@ -133,32 +86,48 @@ class DatabaseManager:
             row = cursor.fetchone()
 
             if not row:
-                return None
+                return {
+                    "pos": "Unknown",
+                    "definition": "Definition not found.",
+                    "ancient_context": None,
+                }
 
-            # Process Ancient Context from LSJ entry_json
-            ancient_context = ""
+            # 1. Definitions (Prefer English, fallback to Greek)
+            definition = row["english_def"]
+            if not definition:
+                definition = row["greek_def"]
+
+            # 2. Ancient Context (The Jewel Mining)
+            ancient_context = None
             if row["entry_json"]:
                 try:
                     entry = json.loads(row["entry_json"])
+                    # Look for the first sense with a citation
                     senses = entry.get("senses", [])
-                    definitions = []
                     for sense in senses:
-                        defn = sense.get("definition", "").strip()
-                        if defn:
-                            definitions.append(defn)
-                    ancient_context = " || ".join(definitions)
-                except json.JSONDecodeError:
+                        if sense.get("citations"):
+                            # Grab the first valid citation
+                            cit = sense["citations"][0]
+                            author = cit.get("author", "Ancient Source")
+                            text = cit.get("text", "")
+                            trans = cit.get("translation", "")
+                            if text:
+                                ancient_context = {
+                                    "author": author,
+                                    "greek": text,
+                                    "translation": trans,
+                                }
+                                break
+                except:
                     pass
 
             return {
                 "pos": row["pos"],
                 "ipa": row["ipa"],
+                "definition": definition,
                 "ancient_context": ancient_context,
-                "etymology": row["etymology_json"],
             }
-        except sqlite3.Error as e:
-            logger.error(f"Database error in get_metadata: {e}")
-            return None
 
-    def close(self):
-        self.conn.close()
+        except Exception as e:
+            logger.error(f"DB Error in get_metadata: {e}")
+            return {}

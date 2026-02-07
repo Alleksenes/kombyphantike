@@ -5,12 +5,11 @@ import sys
 from pathlib import Path
 from tqdm import tqdm
 
-# --- CONFIGURATION ---
-# Ensure src is in path to import config
+# Add project root to path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from src.config import KAIKKI_EL_FILE, PROCESSED_DIR
 
-# Database Path
+# --- CONFIGURATION ---
 DB_PATH = PROCESSED_DIR / "kombyphantike_v2.db"
 BATCH_SIZE = 5000
 
@@ -19,32 +18,32 @@ logging.basicConfig(
 )
 
 
-# --- DATABASE SCHEMA ---
 def create_schema(cursor):
-    """Defines the Bedrock Schema for Greek Wiktionary."""
-    # Drop dependent tables first
+    """Destroys and Rebuilds the World."""
     cursor.execute("DROP TABLE IF EXISTS relations")
     cursor.execute("DROP TABLE IF EXISTS forms")
     cursor.execute("DROP TABLE IF EXISTS lemmas")
 
-    # Lemmas: The Atoms
+    # Lemmas: Now with Greek Definition (Crucial)
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS lemmas (
+        CREATE TABLE lemmas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lemma_text TEXT NOT NULL UNIQUE,
             pos TEXT,
             ipa TEXT,
             etymology_json TEXT,
-            greek_def TEXT,
-            english_def TEXT
+            greek_def TEXT, 
+            english_def TEXT,
+            lsj_id INTEGER -- Placeholder for the Weaver
         )
     """
     )
-    # Forms: The Shape Shifters (Paradigm)
+
+    # Forms: The Paradigm
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS forms (
+        CREATE TABLE forms (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lemma_id INTEGER NOT NULL,
             form_text TEXT NOT NULL,
@@ -53,10 +52,11 @@ def create_schema(cursor):
         )
     """
     )
-    # Relations: The Constellation (Synonyms, Roots)
+
+    # Relations: The Soft Links
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS relations (
+        CREATE TABLE relations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             child_lemma_id INTEGER NOT NULL,
             parent_lemma_text TEXT NOT NULL,
@@ -65,140 +65,114 @@ def create_schema(cursor):
         )
     """
     )
-    # Indexing for Speed
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_lemma_text ON lemmas(lemma_text)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_forms_lemma ON forms(lemma_id)")
+
+    cursor.execute("CREATE INDEX idx_lemma_text ON lemmas(lemma_text)")
+    cursor.execute("CREATE INDEX idx_forms_lemma ON forms(lemma_id)")
+    cursor.execute(
+        "CREATE INDEX idx_forms_text ON forms(form_text)"
+    )  # Crucial for Reverse Lookup
 
 
-# --- INGESTION LOGIC ---
 def ingest_kaikki_el():
     if not KAIKKI_EL_FILE.exists():
-        logging.error(f"Kaikki dictionary not found at {KAIKKI_EL_FILE}. Aborting.")
+        logging.error(f"File not found: {KAIKKI_EL_FILE}")
         return
-
-    # Pre-calculate size for the Progress Bar
-    logging.info("Measuring the scroll length...")
-    total_lines = sum(1 for _ in open(KAIKKI_EL_FILE, "r", encoding="utf-8"))
-    logging.info(f"Found {total_lines:,} entries.")
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+
+    logging.info("Resetting Schema...")
     create_schema(cursor)
 
+    logging.info("Counting lines...")
+    total_lines = sum(1 for _ in open(KAIKKI_EL_FILE, "r", encoding="utf-8"))
+
+    logging.info("Ingesting...")
     count = 0
 
     with open(KAIKKI_EL_FILE, "r", encoding="utf-8") as f:
-        for line in tqdm(f, total=total_lines, desc="Ingesting Kaikki EL"):
+        for line in tqdm(f, total=total_lines):
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
 
-            # Lemma
-            lemma_text = entry.get("word")
-            if not lemma_text:
+            word = entry.get("word")
+            if not word:
                 continue
 
             pos = entry.get("pos")
 
-            # IPA (Find first valid IPA)
-            ipa = None
-            for s in entry.get("sounds", []):
-                if "ipa" in s:
-                    ipa = s["ipa"]
-                    break
+            # IPA
+            ipa = ""
+            if "sounds" in entry:
+                for s in entry["sounds"]:
+                    if "ipa" in s:
+                        ipa = s["ipa"]
+                        break
 
-            # Structured Etymology
-            etymology_json = json.dumps(
-                entry.get("etymology_templates", []), ensure_ascii=False
-            )
+            # Etymology (Raw)
+            etym = json.dumps(entry.get("etymology_templates", []), ensure_ascii=False)
 
-            # English Def: from translations to English
-            english_defs = []
-            for t in entry.get("translations", []):
-                if t.get("code") == "en":
-                    word = t.get("word")
-                    if word:
-                        english_defs.append(word)
-            english_def = "; ".join(english_defs) if english_defs else None
-
-            # Greek Def: from senses glosses
+            # Definitions
+            # Kaikki-EL usually puts definitions in 'senses' -> 'glosses'
             greek_defs = []
             form_of_parents = set()
-            for s in entry.get("senses", []):
-                # 1. Capture Definition
-                glosses = s.get("glosses", [])
-                if glosses:
-                    greek_defs.extend(glosses)
 
-                # 2. CAPTURE THE LINK (Missing in your version)
-                # This tells us: "ισχύει is a form of ισχύω"
-                if "form_of" in s:
-                    for parent in s["form_of"]:
-                        parent_word = parent.get("word")
-                        if parent_word:
-                            form_of_parents.add(parent_word)
+            for sense in entry.get("senses", []):
+                # 1. Grab Greek Definition
+                if "glosses" in sense:
+                    greek_defs.extend(sense["glosses"])
 
-            greek_def = " || ".join(greek_defs) if greek_defs else None
+                # 2. Grab Redirects (The Soft Link)
+                # Look for "form_of", "alt_of", "inflection_of"
+                for tag in ["form_of", "alt_of", "inflection_of"]:
+                    if tag in sense:
+                        for ref in sense[tag]:
+                            if "word" in ref:
+                                form_of_parents.add(ref["word"])
+
+            greek_def_str = " | ".join(greek_defs) if greek_defs else ""
 
             # Insert Lemma
             cursor.execute(
                 """
-                INSERT OR IGNORE INTO lemmas (lemma_text, pos, ipa, etymology_json, greek_def, english_def)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (lemma_text, pos, ipa, etymology_json, greek_def, english_def),
+                INSERT OR IGNORE INTO lemmas (lemma_text, pos, ipa, etymology_json, greek_def)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                (word, pos, ipa, etym, greek_def_str),
             )
 
-            # Get ID
-            cursor.execute("SELECT id FROM lemmas WHERE lemma_text = ?", (lemma_text,))
+            # Get the ID we just inserted (or retrieved)
+            cursor.execute("SELECT id FROM lemmas WHERE lemma_text = ?", (word,))
             res = cursor.fetchone()
             if not res:
                 continue
             lemma_id = res[0]
 
-            # Insert Form Of Relations
-            for parent_word in form_of_parents:
+            # Insert Relations (The Fix for ισχύει)
+            for parent in form_of_parents:
                 cursor.execute(
                     """
                     INSERT INTO relations (child_lemma_id, parent_lemma_text, relation_type)
-                    VALUES (?, ?, ?)
-                    """,
-                    (lemma_id, parent_word, "form_of"),
+                    VALUES (?, ?, 'form_of')
+                """,
+                    (lemma_id, parent),
                 )
 
-            # Forms
-            for form in entry.get("forms", []):
-                form_text = form.get("form")
-                tags = form.get("tags", [])
-                if form_text:
-                    cursor.execute(
-                        """
-                        INSERT INTO forms (lemma_id, form_text, tags_json)
-                        VALUES (?, ?, ?)
-                    """,
-                        (lemma_id, form_text, json.dumps(tags, ensure_ascii=False)),
-                    )
-
-            # Relations
-            relation_keys = [
-                "derived",
-                "related",
-                "synonyms",
-                "antonyms",
-                "compounds",
-                "descendants",
-            ]
-            for key in relation_keys:
-                for item in entry.get(key, []):
-                    parent_text = item.get("word")
-                    if parent_text:
+            # Insert Forms (The Paradigm)
+            # Kaikki-EL flattens forms nicely
+            if "forms" in entry:
+                for form in entry["forms"]:
+                    f_text = form.get("form")
+                    f_tags = form.get("tags", [])
+                    if f_text:
                         cursor.execute(
                             """
-                            INSERT INTO relations (child_lemma_id, parent_lemma_text, relation_type)
+                            INSERT INTO forms (lemma_id, form_text, tags_json)
                             VALUES (?, ?, ?)
                         """,
-                            (lemma_id, parent_text, key),
+                            (lemma_id, f_text, json.dumps(f_tags, ensure_ascii=False)),
                         )
 
             count += 1
@@ -206,13 +180,10 @@ def ingest_kaikki_el():
                 conn.commit()
 
     conn.commit()
-    logging.info("Optimizing database structure...")
     conn.execute("VACUUM")
     conn.close()
-
-    logging.info(f"Ingestion complete. {count:,} entries saved to {DB_PATH}.")
+    logging.info("Ingestion Complete.")
 
 
 if __name__ == "__main__":
-    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     ingest_kaikki_el()
