@@ -581,6 +581,7 @@ class KombyphantikeEngine:
                     "optional_adverb": "",
                     "ancient_context": ancient_ctx,
                     "modern_context": modern_ctx,
+                    "knot_definition": knot.get("Description", ""),
                     "knot_context": "",
                     "theme": f"{theme} (Focus: {hero})",
                 }
