@@ -125,9 +125,25 @@ def ingest_kaikki_el():
             # Greek Def: from senses glosses
             greek_defs = []
             for s in entry.get("senses", []):
+                # 1. Capture Definition
                 glosses = s.get("glosses", [])
                 if glosses:
                     greek_defs.extend(glosses)
+
+                # 2. CAPTURE THE LINK (Missing in your version)
+                # This tells us: "ισχύει is a form of ισχύω"
+                if "form_of" in s:
+                    for parent in s["form_of"]:
+                        parent_word = parent.get("word")
+                        if parent_word:
+                            cursor.execute(
+                                """
+                                INSERT INTO relations (child_lemma_id, parent_lemma_text, relation_type)
+                                VALUES (?, ?, ?)
+                                """,
+                                (lemma_id, parent_word, "form_of"),
+                            )
+
             greek_def = " || ".join(greek_defs) if greek_defs else None
 
             # Insert Lemma
@@ -189,9 +205,7 @@ def ingest_kaikki_el():
     conn.execute("VACUUM")
     conn.close()
 
-    logging.info(
-        f"Ingestion complete. {count:,} entries saved to {DB_PATH}."
-    )
+    logging.info(f"Ingestion complete. {count:,} entries saved to {DB_PATH}.")
 
 
 if __name__ == "__main__":
