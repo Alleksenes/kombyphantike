@@ -136,9 +136,9 @@ def call_gemini(prompt_text: str):
 
 # 5. Endpoints
 
-
-@app.post("/draft_curriculum", response_model=ConstellationGraph)
-def draft_curriculum(request: DraftRequest):
+@app.post("/draft_curriculum", response_model=ConstellationGraph) # Update response model to Graph
+async def draft_curriculum(request: CurriculumRequest): # Use the Pydantic model
+    # Access via request.theme
     """
     STEP 1: The Blueprint.
     Fast. Selects words, knots, and context. No AI generation.

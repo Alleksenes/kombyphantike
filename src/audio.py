@@ -1,7 +1,9 @@
+
 import os
 import base64
-from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
+from elevenlabs.client import ElevenLabs
+
 
 load_dotenv()
 

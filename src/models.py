@@ -1,6 +1,10 @@
 from pydantic import BaseModel
 from typing import List, Optional, Any
 
+class CurriculumRequest(BaseModel):
+    theme: str
+    sentence_count: int = 5
+    
 class ConstellationNode(BaseModel):
     id: str
     label: str
