@@ -601,7 +601,7 @@ class KombyphantikeEngine:
             data={
                 "instruction_text": instruction_text,
                 "session_data": session_data,
-                "words_df_json": words_df.to_dict(orient="records")
+                # ANC-> "words_df_json": words_df.to_dict(orient="records")
             }
         ))
         added_node_ids.add(center_id)
@@ -672,6 +672,7 @@ class KombyphantikeEngine:
                     "target_transliteration": "",
                     "knot_id": knot["Knot_ID"],
                     "parent_concept": knot["Parent_Concept"],
+                    "hero": hero, # Use 'hero' instead of the full row
                     "nuance": knot["Nuance"],
                     "core_verb": hero if knot["POS_Tag"] == "Verb" else "",
                     "core_adj": hero if knot["POS_Tag"] == "Adjective" else "",
@@ -687,12 +688,19 @@ class KombyphantikeEngine:
                 # Level 1 Node: The Word (Hero)
                 word_id = f"lemma_{hero}"
                 if word_id not in added_node_ids:
+                    inspector_data = {
+                        "lemma": hero,
+                        "english_meaning": hero_row.get("English_Meaning") or hero_row.get("Definition"),
+                        "pos": hero_row.get("POS"),
+                        "etymology": hero_row.get("Etymology"),
+                        "frequency_score": hero_row.get("Frequency_Score") # Or whatever your column name is
+                    }
                     nodes.append(ConstellationNode(
                         id=word_id,
                         label=hero,
                         type="lemma",
                         status="pending",
-                        data=hero_row.to_dict()
+                        data=inspector_data
                     ))
                     added_node_ids.add(word_id)
                     # Link Center -> Word
@@ -807,7 +815,15 @@ You must prioritize these words in your sentences:
    *   **Resonant:** Use the `ancient_context` field to inspire the meaning, but write modern, natural Greek.
 5. **The Output:** Return **ONLY RAW JSON**. No Markdown formatting (```json), no conversational filler. Just the array.
 
-### INPUT DATA TO PROCESS:
+### RETURN FORMAT ###
+Return ONLY a JSON array of objects. 
+Each object must contain ONLY these keys:
+1. "id" (must match the input id)
+2. "target_sentence" (The Greek sentence)
+3. "source_sentence" (The English translation)
+4. "knot_context" (The philological explanation)
+
+DO NOT return the Kelly statistics, frequency data, or etymology.
 """
         return text
 

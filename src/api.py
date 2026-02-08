@@ -136,6 +136,19 @@ def call_gemini(prompt_text: str):
     except Exception as e:
         logger.error(f"Gemini Error: {e}")
         raise e
+    except json.JSONDecodeError as e:
+        logger.warning(f"JSON Parse Error: {e}. Attempting emergency repair...")
+        # If it ends abruptly, try adding the closing brackets
+        if not clean.endswith("]"):
+            clean += "]"
+        if not clean.endswith("}") and not clean.endswith("]"):
+             clean += "}]"
+             
+        try:
+            return json.loads(clean)
+        except:
+            logger.error("Emergency repair failed.")
+            raise ValueError(f"AI returned unrecoverable JSON: {e}")
 
 
 # 5. Endpoints
@@ -163,63 +176,80 @@ async def draft_curriculum(request: CurriculumRequest): # Use the Pydantic model
         logger.error(f"Draft Error: {e}")
         raise HTTPException(500, str(e))
 
-
 @app.post("/fill_curriculum")
 def fill_curriculum(request: FillRequest):
     """
     STEP 2: The Weave.
+    Prunes the data to prevent Gemini from choking on Kelly metadata.
     """
     if not engine:
         raise HTTPException(500, "Engine not ready")
 
     try:
-        logger.info("Filling curriculum with AI...")
+        logger.info(f"Preparing to fill {len(request.worksheet_data)} nodes with AI...")
 
-        rows_json = json.dumps(request.worksheet_data, indent=2)
+        # --- THE PRUNER: Remove the Slop ---
+        # We only send what the AI needs to write the sentences.
+        lean_data = []
+        for row in request.worksheet_data:
+            # Check for various lemma keys (lemma_text, lemma, etc)
+            lemma = row.get("lemma_text") or row.get("lemma") or row.get("id")
+            
+            # Extract only the essentials
+            lean_row = {
+                "id": row.get("id"),
+                "lemma": lemma,
+                "knot_rule": row.get("knot_definition") or row.get("knot_rule"),
+                "theme": os.environ.get("CURRENT_THEME", "General") # Context
+            }
+            
+            # Flatten ancient_context if it's a dict to save tokens
+            actx = row.get("ancient_context")
+            if isinstance(actx, dict):
+                lean_row["ancient_ref"] = f"{actx.get('author')} - {actx.get('work')}"
+            
+            lean_data.append(lean_row)
+
+        # Use the LEAN data for the prompt
+        rows_json = json.dumps(lean_data, indent=2)
+        
         full_prompt = (
-            request.instruction_text + "\n\n### DATA TO COMPLETE ###\n" + rows_json
+            request.instruction_text + 
+            "\n\n### DATA TO COMPLETE ###\n" + 
+            "Return a JSON array where each object has: id, target_sentence, source_sentence, knot_context.\n" +
+            rows_json
         )
 
+        # Call AI
         filled_rows = call_gemini(full_prompt)
 
         if isinstance(filled_rows, list):
-            # --- MERGE & RESTORE STATIC DATA ---
-            # Ensure we don't lose static fields (like knot_definition) if AI dropped them
-            # We assume order is preserved (1:1 mapping) as instructed in prompt
-            if len(filled_rows) == len(request.worksheet_data):
-                for i, row in enumerate(filled_rows):
-                    original = request.worksheet_data[i]
-                    # Restore critical static fields if missing
-                    # We can iterate over original keys and ensure they exist in new row
-                    for key, val in original.items():
-                        if key not in row:
-                            row[key] = val
-            else:
-                logger.warning(
-                    f"Row count mismatch: AI returned {len(filled_rows)}, expected {len(request.worksheet_data)}. Merging disabled to prevent data corruption."
-                )
+            # --- THE WEAVER: Merge AI results back into the RICH data ---
+            # We map by 'id' to ensure we don't lose the Kelly stats in the final response
+            rich_map = {str(r['id']): r for r in request.worksheet_data}
+            
+            final_output = []
+            for a_row in filled_rows:
+                node_id = str(a_row.get("id"))
+                if node_id in rich_map:
+                    target_node = rich_map[node_id]
+                    
+                    # Update the node with AI generation
+                    target_node["target_sentence"] = a_row.get("target_sentence")
+                    target_node["source_sentence"] = a_row.get("source_sentence")
+                    target_node["knot_context"] = a_row.get("knot_context")
+                    
+                    # Tokenize the new sentence
+                    greek_text = target_node["target_sentence"]
+                    if greek_text:
+                        target_node["target_tokens"] = engine.tokenize_text(greek_text, "el")
+                        target_node["target_transliteration"] = engine.transliterate_sentence(greek_text)
+                    
+                    final_output.append(target_node)
 
-            # --- THE TOKENIZATION INJECTION ---
-            for row in filled_rows:
-                # Tokenize Greek
-                greek_text = row.get("target_sentence") or row.get(
-                    "Greek Translation / Target Sentence"
-                )
-                if greek_text:
-                    row["target_tokens"] = engine.tokenize_text(greek_text, "el")
-                    row["target_transliteration"] = engine.transliterate_sentence(
-                        greek_text
-                    )
-
-                # Tokenize English (Optional)
-                eng_text = row.get("source_sentence") or row.get("Source Sentence")
-                if eng_text:
-                    row["source_tokens"] = engine.tokenize_text(eng_text, "en")
-            # ----------------------------------
-
-            return {"worksheet_data": filled_rows}
+            return {"worksheet_data": final_output}
         else:
-            raise ValueError("AI returned invalid structure")
+            raise ValueError("AI returned invalid JSON structure (not a list)")
 
     except Exception as e:
         logger.error(f"Fill Error: {e}")
