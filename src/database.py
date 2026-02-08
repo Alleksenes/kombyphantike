@@ -6,139 +6,63 @@ from src.config import PROCESSED_DIR
 
 logger = logging.getLogger(__name__)
 
-
 class DatabaseManager:
     def __init__(self):
         self.db_path = PROCESSED_DIR / "kombyphantike_v2.db"
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
-    def _synthesize_tags(self, tags: list) -> list:
-        """
-        Injects normalized/synthesized tags to help frontend parsing.
-        Example: ["first-person"] -> ["first-person", "1"]
-        Example: ["past", "perfective"] -> ["past", "perfective", "Aorist"]
-        """
-        syn_tags = set(tags)
-
-        # 1. Person
-        if "first-person" in tags:
-            syn_tags.add("1")
-            syn_tags.add("1st")
-        if "second-person" in tags:
-            syn_tags.add("2")
-            syn_tags.add("2nd")
-        if "third-person" in tags:
-            syn_tags.add("3")
-            syn_tags.add("3rd")
-
-        # 2. Number
-        if "singular" in tags:
-            syn_tags.add("Singular")
-        if "plural" in tags:
-            syn_tags.add("Plural")
-
-        # 3. Voice
-        if "active" in tags:
-            syn_tags.add("Active")
-        if "passive" in tags:
-            syn_tags.add("Passive")
-        if "mediopassive" in tags:
-            syn_tags.add("Mediopassive")
-
-        # 4. Tense / Aspect Synthesis
-        # "Present" is usually "present" tag
-        if "present" in tags:
-            syn_tags.add("Present")
-
-        # "Future"
-        if "future" in tags:
-            syn_tags.add("Future")
-
-        # "Imperfect" = Past + Imperfective
-        if "past" in tags and "imperfective" in tags:
-            syn_tags.add("Imperfect")
-
-        # "Aorist" = Past + Perfective
-        if "past" in tags and "perfective" in tags:
-            syn_tags.add("Aorist")
-
-        # "Perfect"
-        if "perfect" in tags:
-            syn_tags.add("Perfect")
-
-        # "Pluperfect"
-        if "pluperfect" in tags:
-            syn_tags.add("Pluperfect")
-
-        return sorted(list(syn_tags))
-
     def get_paradigm(self, lemma):
-        """
-        Retrieves paradigm. Follows 'form_of' links recursively.
-        """
         try:
             cursor = self.conn.cursor()
-
-            # 1. Find the Lemma ID (Direct)
+            target_id = None
+            
+            # 1. Direct Lemma Lookup
             cursor.execute("SELECT id FROM lemmas WHERE lemma_text = ?", (lemma,))
             row = cursor.fetchone()
-
-            target_id = None
             if row:
                 target_id = row[0]
-            else:
-                # 2. If not found, look for a PARENT (Soft Link)
-                # "ισχύει" is not a lemma, but it points to "ισχύω"
-                cursor.execute(
-                    """
-                    SELECT l.id 
-                    FROM relations r
-                    JOIN lemmas l ON r.parent_lemma_text = l.lemma_text
+            
+            # 2. 'form_of' Redirect Lookup
+            if not target_id:
+                cursor.execute("""
+                    SELECT l.id FROM relations r
                     JOIN lemmas child ON r.child_lemma_id = child.id
+                    JOIN lemmas l ON r.parent_lemma_text = l.lemma_text
                     WHERE child.lemma_text = ? AND r.relation_type = 'form_of'
-                """,
-                    (lemma,),
-                )
+                """, (lemma,))
                 parent_row = cursor.fetchone()
                 if parent_row:
                     target_id = parent_row[0]
 
             if not target_id:
-                return []  # Return empty list, not None, to prevent crashes
+                return []
 
-            # 3. Fetch Forms for the Target
-            cursor.execute(
-                "SELECT form_text, tags_json FROM forms WHERE lemma_id = ?",
-                (target_id,),
-            )
+            # 3. Fetch all forms for the resolved lemma ID
+            cursor.execute("SELECT form_text, tags_json FROM forms WHERE lemma_id = ?", (target_id,))
             rows = cursor.fetchall()
 
             paradigm = []
             for r in rows:
                 tags = json.loads(r["tags_json"]) if r["tags_json"] else []
-                tags = self._synthesize_tags(tags)
                 entry = {"form": r["form_text"], "tags": tags}
-                # Highlight logic: If this form matches our input word
                 if r["form_text"] == lemma:
                     entry["is_current_form"] = True
                 paradigm.append(entry)
-
+            
             return paradigm
 
         except Exception as e:
-            logger.error(f"DB Error in get_paradigm: {e}")
+            logger.error(f"DB Error in get_paradigm for '{lemma}': {e}")
             return []
 
     def get_metadata(self, lemma):
-        """
-        Fetches POS, IPA, Definitions (Greek/English), and Ancient Context (LSJ).
-        """
         try:
             cursor = self.conn.cursor()
-            # Join Lemmas with LSJ Entries
+            
+            # THE CRITICAL FIX: SELECT *ALL* THE COLUMNS WE NEED
             query = """
-                SELECT l.pos, l.ipa, l.greek_def, l.english_def, lsj.entry_json
+                SELECT l.pos, l.ipa, l.greek_def, l.english_def, l.shift_type, l.semantic_warning, lsj.entry_json
                 FROM lemmas l
                 LEFT JOIN lsj_entries lsj ON l.lsj_id = lsj.id
                 WHERE l.lemma_text = ?
@@ -147,48 +71,50 @@ class DatabaseManager:
             row = cursor.fetchone()
 
             if not row:
-                return {
-                    "pos": "Unknown",
-                    "definition": "Definition not found.",
-                    "ancient_context": None,
-                }
+                return {"definition": "Not found in database."}
 
-            # 1. Definitions (Prefer English, fallback to Greek)
-            definition = row["english_def"]
-            if not definition:
-                definition = row["greek_def"]
+            # Prioritize English definition, fallback to Greek
+            definition = row["english_def"] if row["english_def"] else row["greek_def"]
 
-            # 2. Ancient Context (The Jewel Mining)
+            # Robust Jewel Mining for Ancient Context
             ancient_context = None
             if row["entry_json"]:
                 try:
                     entry = json.loads(row["entry_json"])
-                    # Look for the first sense with a citation
-                    senses = entry.get("senses", [])
-                    for sense in senses:
-                        if sense.get("citations"):
-                            # Grab the first valid citation
-                            cit = sense["citations"][0]
-                            author = cit.get("author", "Ancient Source")
-                            text = cit.get("text", "")
-                            trans = cit.get("translation", "")
-                            if text:
-                                ancient_context = {
-                                    "author": author,
-                                    "greek": text,
-                                    "translation": trans,
-                                }
-                                break
-                except:
-                    pass
+                    for sense in entry.get("senses", []):
+                        citations = sense.get("citations", [])
+                        if citations:
+                            # Find the first good citation
+                            for cit in citations:
+                                if cit.get("text") and cit.get("author"):
+                                    ancient_context = {
+                                        "author": cit.get("author"),
+                                        "work": cit.get("work", ""),
+                                        "greek": cit.get("text"),
+                                        "translation": cit.get("translation", "")
+                                    }
+                                    break # Found a good one, stop searching
+                        if ancient_context:
+                            break # Found a jewel in this sense, stop searching senses
+                except Exception as e:
+                    logger.warning(f"LSJ JSON parse error for {lemma}: {e}")
+            
+            if not ancient_context:
+                 ancient_context = {"author": "LSJ", "greek": "No direct citation found.", "translation": ""}
+
 
             return {
                 "pos": row["pos"],
                 "ipa": row["ipa"],
                 "definition": definition,
-                "ancient_context": ancient_context,
+                "shift_type": row["shift_type"],
+                "semantic_warning": row["semantic_warning"],
+                "ancient_context": ancient_context
             }
 
         except Exception as e:
-            logger.error(f"DB Error in get_metadata: {e}")
+            logger.error(f"DB Error in get_metadata for '{lemma}': {e}")
             return {}
+
+    def close(self):
+        self.conn.close()

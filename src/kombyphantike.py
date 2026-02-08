@@ -141,7 +141,7 @@ class KombyphantikeEngine:
                 except:
                     print("Spacy missing. Semantic search will be degraded.")
 
-   def transliterate_sentence(self, text: str) -> str:
+    def transliterate_sentence(self, text: str) -> str:
         """
         Helper to transliterate a full Greek sentence to Latin characters.
         """
