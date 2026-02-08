@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Dict, List
 from src.kombyphantike import KombyphantikeEngine
 from src.audio import generate_audio
+from src.models import ConstellationGraph
 import re
 import logging
 from pathlib import Path
@@ -136,11 +137,12 @@ def call_gemini(prompt_text: str):
 # 5. Endpoints
 
 
-@app.post("/draft_curriculum")
+@app.post("/draft_curriculum", response_model=ConstellationGraph)
 def draft_curriculum(request: DraftRequest):
     """
     STEP 1: The Blueprint.
     Fast. Selects words, knots, and context. No AI generation.
+    Returns a ConstellationGraph.
     """
     if not engine:
         raise HTTPException(500, "Engine not ready")
@@ -148,13 +150,11 @@ def draft_curriculum(request: DraftRequest):
     try:
         logger.info(f"Drafting: {request.theme}")
         # Call core logic WITHOUT AI
-        result = engine.compile_curriculum(request.theme, request.count)
+        # engine.compile_curriculum now returns ConstellationGraph
+        graph = engine.compile_curriculum(request.theme, request.count)
 
-        # Return the structure
-        return {
-            "worksheet_data": result["worksheet_data"],
-            "instruction_text": result["instruction_text"],
-        }
+        # Return the structure directly
+        return graph
     except Exception as e:
         logger.error(f"Draft Error: {e}")
         raise HTTPException(500, str(e))
