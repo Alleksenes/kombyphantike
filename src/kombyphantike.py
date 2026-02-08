@@ -496,6 +496,8 @@ class KombyphantikeEngine:
             candidates = candidates[:RELATIONS_LIMIT]
 
             for new_word in candidates:
+                new_row = None
+
                 # Get Metadata for POS
                 meta = self.db.get_metadata(new_word)
                 pos_raw = meta.get("pos", "noun") # Default to noun if unknown?
@@ -521,7 +523,9 @@ class KombyphantikeEngine:
                 if meta.get("definition"):
                      new_row["Modern_Def"] = meta["definition"]
 
-                new_rows.append(new_row)
+                if new_row is not None:
+                    new_rows.append(new_row)
+
                 original_lemmas.add(new_word.lower()) # prevent re-adding
 
         if new_rows:
@@ -638,8 +642,14 @@ class KombyphantikeEngine:
 
             candidates.sort(key=lambda w: self.get_usage_count(w))
 
+            # Guard Clause: If candidates is still empty, skip this knot
+            if not candidates:
+                continue
+
             # Create Nodes
             for i in range(SENTENCES_PER_KNOT):
+                row_data = None
+
                 hero = next(
                     (c for c in candidates if c not in used_heroes),
                     candidates[i % len(candidates)],
@@ -707,15 +717,16 @@ class KombyphantikeEngine:
                 rule_id = f"rule_{knot['Knot_ID']}_{hero}_{i}"
                 rule_label = knot.get("Nuance") or knot.get("Description", "Rule")
 
-                nodes.append(ConstellationNode(
-                    id=rule_id,
-                    label=rule_label,
-                    type="rule",
-                    status="pending",
-                    data=row_data
-                ))
-                # Link Word -> Rule
-                links.append(ConstellationLink(source=word_id, target=rule_id, value=0.5))
+                if row_data:
+                    nodes.append(ConstellationNode(
+                        id=rule_id,
+                        label=rule_label,
+                        type="rule",
+                        status="pending",
+                        data=row_data
+                    ))
+                    # Link Word -> Rule
+                    links.append(ConstellationLink(source=word_id, target=rule_id, value=0.5))
 
         return ConstellationGraph(nodes=nodes, links=links)
 

@@ -146,13 +146,22 @@ class TestExpandWordPool(unittest.TestCase):
         # Run
         result = engine.compile_curriculum("Theme", 10)
 
+        # Verify result is a ConstellationGraph
+        from src.models import ConstellationGraph
+        self.assertIsInstance(result, ConstellationGraph)
+
+        # Extract center node data
+        center_node = next(n for n in result.nodes if n.type == "theme")
+        instruction = center_node.data["instruction_text"]
+
         # Verify result contains the new word in instruction text
-        instruction = result["instruction_text"]
         self.assertIn("integrated_syn", instruction)
 
         # Verify words_df in result has it
-        words_df = result["words_df"]
-        self.assertIn("integrated_syn", words_df["Lemma"].tolist())
+        words_list = center_node.data["words_df_json"]
+        # words_df_json is list of dicts
+        lemmas = [w["Lemma"] for w in words_list]
+        self.assertIn("integrated_syn", lemmas)
 
 if __name__ == "__main__":
     unittest.main()
