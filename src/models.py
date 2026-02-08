@@ -4,18 +4,17 @@ from typing import List, Optional, Any
 class CurriculumRequest(BaseModel):
     theme: str
     sentence_count: int = 5
-    
+
 class ConstellationNode(BaseModel):
     id: str
     label: str
-    type: str  # "theme", "lemma", "rule"
-    status: str
-    data: Optional[Any] = None
+    type: str  # 'lemma', 'rule', 'theme'
+    status: str = "locked" # 'locked', 'unlocked', 'mastered'
 
 class ConstellationLink(BaseModel):
     source: str
     target: str
-    value: float
+    value: float = 1.0
 
 class ConstellationGraph(BaseModel):
     nodes: List[ConstellationNode]

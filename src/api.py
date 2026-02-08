@@ -18,6 +18,10 @@ from google.genai import types
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("kombyphantike-api")
 
+class CurriculumRequest(BaseModel):
+    theme: str
+    sentence_count: int = 5
+
 app = FastAPI(title="Kombyphantike API", version="0.2.0")
 
 # CORS
@@ -151,7 +155,7 @@ async def draft_curriculum(request: CurriculumRequest): # Use the Pydantic model
         logger.info(f"Drafting: {request.theme}")
         # Call core logic WITHOUT AI
         # engine.compile_curriculum now returns ConstellationGraph
-        graph = engine.compile_curriculum(request.theme, request.count)
+        graph = engine.compile_curriculum(request.theme, request.sentence_count)
 
         # Return the structure directly
         return graph

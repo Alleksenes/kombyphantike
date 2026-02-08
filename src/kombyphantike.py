@@ -652,10 +652,22 @@ class KombyphantikeEngine:
                 # Contexts
                 # Use DB for Ancient Context
                 metadata = self.db.get_metadata(hero)
-                ancient_ctx = metadata.get("ancient_context", "") if metadata else ""
-
-                if not ancient_ctx or ancient_ctx.strip() == "":
-                    ancient_ctx = "NO_CITATION_FOUND"
+                ancient_ctx = self.db.get_metadata(row['lemma'])
+            
+                # SAFE HANDLING: Check if it's a Dictionary (The Jewel) or None
+                if ancient_ctx and isinstance(ancient_ctx, dict):
+                    # It is a rich object (New System)
+                    row['ancient_context'] = ancient_ctx
+                    # We do NOT add it to prompt context to save tokens, 
+                    # or we format it as string for the AI:
+                    ctx_str = f"Citation: {ancient_ctx.get('author', 'Unknown')} - {ancient_ctx.get('work', '')}"
+                    context_for_prompt += f"\n- {row['lemma']}: {ctx_str}"
+                elif ancient_ctx and isinstance(ancient_ctx, str) and ancient_ctx.strip():
+                    # It is a string (Old System fallback)
+                    row['ancient_context'] = {"author": "Classic", "greek": ancient_ctx, "translation": ""}
+                    context_for_prompt += f"\n- {row['lemma']}: {ancient_ctx}"
+                else:
+                    row['ancient_context'] = None
 
                 modern_ctx = self._get_modern_context(hero, hero_row, corpus)
 
