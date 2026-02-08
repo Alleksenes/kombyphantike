@@ -206,7 +206,14 @@ def fill_curriculum(request: FillRequest):
             # Flatten ancient_context if it's a dict to save tokens
             actx = row.get("ancient_context")
             if isinstance(actx, dict):
-                lean_row["ancient_ref"] = f"{actx.get('author')} - {actx.get('work')}"
+                # JEWEL PRESERVATION: Provide the actual text to inspire the AI
+                author = actx.get('author', 'Unknown')
+                work = actx.get('work', '')
+                greek = actx.get('greek', '')
+                translation = actx.get('translation', '')
+                lean_row["ancient_context"] = f"{author} ({work}): {greek} - {translation}"
+            elif isinstance(actx, str) and actx:
+                lean_row["ancient_context"] = actx
             
             lean_data.append(lean_row)
 
