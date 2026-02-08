@@ -1,12 +1,30 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from fastapi.testclient import TestClient
 import sys
 from pathlib import Path
 
 # Adjust sys.path to include src
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
+# --- MOCKING HEAVY DEPENDENCIES ---
+# We must mock these BEFORE importing src.api to avoid ImportError or heavy loading
+sys.modules["transliterate"] = MagicMock()
+sys.modules["sentence_transformers"] = MagicMock()
+sys.modules["elevenlabs"] = MagicMock()
+sys.modules["google"] = MagicMock()
+sys.modules["google.genai"] = MagicMock()
+sys.modules["spacy"] = MagicMock()
+
+# Mock internal modules that import heavy stuff
+# Note: patching src.kombyphantike means src.api will import a Mock object
+mock_komby = MagicMock()
+sys.modules["src.kombyphantike"] = mock_komby
+
+mock_audio = MagicMock()
+sys.modules["src.audio"] = mock_audio
+# ----------------------------------
+
+from fastapi.testclient import TestClient
 from src.api import app
 
 class TestApiRelations(unittest.TestCase):
@@ -14,6 +32,9 @@ class TestApiRelations(unittest.TestCase):
     @patch("src.api.KombyphantikeEngine")
     def test_get_relations_success(self, MockEngine):
         # Configure the mock engine instance that startup_event will create
+        # Note: Since src.kombyphantike is mocked, MockEngine here is patching
+        # the attribute on the mock module. It works the same.
+
         mock_instance = MockEngine.return_value
         mock_db = MagicMock()
         mock_db.get_relations.return_value = {
