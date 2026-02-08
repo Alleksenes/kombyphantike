@@ -1,6 +1,7 @@
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from typing import Dict, List
 from src.kombyphantike import KombyphantikeEngine
 from src.audio import generate_audio
 import re
@@ -237,4 +238,19 @@ async def speak(request: SpeakRequest):
         
     except Exception as e:
         logger.error(f"Speak Error: {e}")
+        raise HTTPException(500, str(e))
+
+@app.get("/relations/{lemma_text}", response_model=Dict[str, List[str]])
+def get_relations(lemma_text: str):
+    """
+    Returns semantic relationships for the given lemma (e.g. synonyms, antonyms).
+    """
+    if not engine:
+        raise HTTPException(500, "Engine not ready")
+
+    try:
+        result = engine.db.get_relations(lemma_text)
+        return result
+    except Exception as e:
+        logger.error(f"Relations Error: {e}")
         raise HTTPException(500, str(e))
