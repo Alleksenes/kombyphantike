@@ -39,6 +39,7 @@ def hydrate_lemmas():
             ipa TEXT,
             etymology_json TEXT,
             modern_def TEXT,
+            greek_def TEXT,
             shift_type TEXT,
             semantic_warning TEXT,
             frequency_score REAL
@@ -53,6 +54,7 @@ def hydrate_lemmas():
 
     columns_to_add = {
         "modern_def": "TEXT",
+        "greek_def": "TEXT",
         "shift_type": "TEXT",
         "semantic_warning": "TEXT",
         "frequency_score": "REAL"
@@ -77,12 +79,14 @@ def hydrate_lemmas():
             continue
 
         modern_def = row.get("Modern_Def")
+        greek_def = row.get("Greek_Def")
         shift_type = row.get("Shift_Type")
         semantic_warning = row.get("Semantic_Warning")
         freq = row.get("Συχνότητα (Frequency)")
 
         # Handle NaNs
         modern_def = modern_def if not pd.isna(modern_def) else None
+        greek_def = greek_def if not pd.isna(greek_def) else None
         shift_type = shift_type if not pd.isna(shift_type) else None
         semantic_warning = semantic_warning if not pd.isna(semantic_warning) else None
 
@@ -99,10 +103,10 @@ def hydrate_lemmas():
             cursor.execute(
                 """
                 UPDATE lemmas
-                SET modern_def = ?, shift_type = ?, semantic_warning = ?, frequency_score = ?
+                SET modern_def = ?, greek_def = ?, shift_type = ?, semantic_warning = ?, frequency_score = ?
                 WHERE lemma_text = ?
                 """,
-                (modern_def, shift_type, semantic_warning, frequency_score, lemma_text)
+                (modern_def, greek_def, shift_type, semantic_warning, frequency_score, lemma_text)
             )
             updates += 1
         else:
@@ -113,10 +117,10 @@ def hydrate_lemmas():
 
             cursor.execute(
                 """
-                INSERT INTO lemmas (lemma_text, pos, modern_def, shift_type, semantic_warning, frequency_score)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO lemmas (lemma_text, pos, modern_def, greek_def, shift_type, semantic_warning, frequency_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (lemma_text, pos, modern_def, shift_type, semantic_warning, frequency_score)
+                (lemma_text, pos, modern_def, greek_def, shift_type, semantic_warning, frequency_score)
             )
             inserts += 1
 
