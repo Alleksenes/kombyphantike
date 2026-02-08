@@ -15,6 +15,7 @@ from collections import Counter
 from src.config import PROCESSED_DIR, DATA_DIR
 from src.knot_loader import KnotLoader
 from src.database import DatabaseManager
+from src.models import ConstellationNode, ConstellationLink, ConstellationGraph
 
 # Suppress warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -534,7 +535,7 @@ class KombyphantikeEngine:
     def compile_curriculum(self, theme, target_sentences):
         """
         THE CORE LOGIC.
-        Returns a dictionary containing the structured data.
+        Returns a ConstellationGraph object.
         Does NOT save to files. This is used by both CLI and API.
         """
         SENTENCES_PER_KNOT = 4
@@ -575,9 +576,32 @@ class KombyphantikeEngine:
             ],
         }
 
-        # 4. Weave Rows
-        rows = []
-        print(f"--- WEAVING CURRICULUM ---")
+        # 4. Generate Instruction Text
+        instruction_text = self.generate_ai_instruction(
+            theme, target_sentences, words_df
+        )
+
+        # 5. Build Graph
+        print(f"--- WEAVING CURRICULUM INTO CONSTELLATION ---")
+        nodes = []
+        links = []
+        added_node_ids = set()
+
+        # Center Node
+        center_id = "center_theme"
+        nodes.append(ConstellationNode(
+            id=center_id,
+            label=theme,
+            type="theme",
+            status="active",
+            data={
+                "instruction_text": instruction_text,
+                "session_data": session_data,
+                "words_df_json": words_df.to_dict(orient="records")
+            }
+        ))
+        added_node_ids.add(center_id)
+
         used_heroes = set()
 
         for knot in selected_knots:
@@ -614,7 +638,7 @@ class KombyphantikeEngine:
 
             candidates.sort(key=lambda w: self.get_usage_count(w))
 
-            # Create Rows
+            # Create Nodes
             for i in range(SENTENCES_PER_KNOT):
                 hero = next(
                     (c for c in candidates if c not in used_heroes),
@@ -631,14 +655,11 @@ class KombyphantikeEngine:
                 ancient_ctx = metadata.get("ancient_context", "") if metadata else ""
 
                 if not ancient_ctx or ancient_ctx.strip() == "":
-                    # Fallback to Kelly if missing in DB? Or just NO_CITATION_FOUND as before
-                    # The prompt says "fetch Ancient Context using self.db.get_metadata(lemma)"
-                    # We will respect that.
                     ancient_ctx = "NO_CITATION_FOUND"
 
                 modern_ctx = self._get_modern_context(hero, hero_row, corpus)
 
-                row = {
+                row_data = {
                     "source_sentence": "",
                     "target_sentence": "",
                     "target_transliteration": "",
@@ -655,19 +676,36 @@ class KombyphantikeEngine:
                     "knot_context": "",
                     "theme": f"{theme} (Focus: {hero})",
                 }
-                rows.append(row)
 
-        # 5. Generate Instruction Text
-        instruction_text = self.generate_ai_instruction(
-            theme, target_sentences, words_df
-        )
+                # Level 1 Node: The Word (Hero)
+                word_id = f"lemma_{hero}"
+                if word_id not in added_node_ids:
+                    nodes.append(ConstellationNode(
+                        id=word_id,
+                        label=hero,
+                        type="lemma",
+                        status="pending",
+                        data=hero_row.to_dict()
+                    ))
+                    added_node_ids.add(word_id)
+                    # Link Center -> Word
+                    links.append(ConstellationLink(source=center_id, target=word_id, value=1.0))
 
-        return {
-            "worksheet_data": rows,
-            "instruction_text": instruction_text,
-            "session_data": session_data,
-            "words_df": words_df,
-        }
+                # Level 2 Node: The Rule Instance
+                rule_id = f"rule_{knot['Knot_ID']}_{hero}_{i}"
+                rule_label = knot.get("Nuance") or knot.get("Description", "Rule")
+
+                nodes.append(ConstellationNode(
+                    id=rule_id,
+                    label=rule_label,
+                    type="rule",
+                    status="pending",
+                    data=row_data
+                ))
+                # Link Word -> Rule
+                links.append(ConstellationLink(source=word_id, target=rule_id, value=0.5))
+
+        return ConstellationGraph(nodes=nodes, links=links)
 
     def _check_paradigm_for_plural(self, lemma):
         paradigm = self.db.get_paradigm(lemma)
@@ -795,15 +833,26 @@ You must prioritize these words in your sentences:
         CLI Entry Point.
         Generates data, saves to CSV, saves prompt to TXT.
         """
-        # 1. Compile Data
-        result = self.compile_curriculum(theme, target_sentences)
+        # 1. Compile Graph
+        graph = self.compile_curriculum(theme, target_sentences)
 
-        # 2. Save Session
+        # 2. Extract Data from Graph
+        center_node = next(n for n in graph.nodes if n.type == "theme")
+        instruction_text = center_node.data["instruction_text"]
+        session_data = center_node.data["session_data"]
+
+        # Extract rows from rule nodes
+        worksheet_data = []
+        for n in graph.nodes:
+            if n.type == "rule" and n.data:
+                worksheet_data.append(n.data)
+
+        # 3. Save Session
         with open(SESSION_FILE, "w", encoding="utf-8") as f:
-            json.dump(result["session_data"], f, ensure_ascii=False, indent=2)
+            json.dump(session_data, f, ensure_ascii=False, indent=2)
 
-        # 3. Map to CSV & Save
-        csv_rows = self._map_to_legacy_csv(result["worksheet_data"])
+        # 4. Map to CSV & Save
+        csv_rows = self._map_to_legacy_csv(worksheet_data)
         df = pd.DataFrame(csv_rows)
         # Ensure all columns exist
         cols = [
@@ -829,9 +878,9 @@ You must prioritize these words in your sentences:
 
         self.save_progress()
 
-        # 4. Save Prompt
+        # 5. Save Prompt
         with open(PROMPT_INSTRUCTION_FILE, "w", encoding="utf-8") as f:
-            f.write(result["instruction_text"])
+            f.write(instruction_text)
 
         print(f"Worksheet generated: {WORKSHEET_OUTPUT}")
 
