@@ -116,5 +116,43 @@ class DatabaseManager:
             logger.error(f"DB Error in get_metadata for '{lemma}': {e}")
             return {}
 
+    def get_relations(self, lemma_text: str) -> dict:
+        try:
+            cursor = self.conn.cursor()
+
+            # 1. Find the ID of the lemma
+            cursor.execute("SELECT id FROM lemmas WHERE lemma_text = ?", (lemma_text,))
+            row = cursor.fetchone()
+
+            if not row:
+                return {}
+
+            lemma_id = row[0]
+
+            # 2. Query relations table
+            cursor.execute("""
+                SELECT relation_type, parent_lemma_text
+                FROM relations
+                WHERE child_lemma_id = ?
+            """, (lemma_id,))
+
+            rows = cursor.fetchall()
+
+            # 3. Group by relation_type
+            relations = {}
+            for r in rows:
+                rtype = r["relation_type"]
+                target = r["parent_lemma_text"]
+
+                if rtype not in relations:
+                    relations[rtype] = []
+                relations[rtype].append(target)
+
+            return relations
+
+        except Exception as e:
+            logger.error(f"DB Error in get_relations for '{lemma_text}': {e}")
+            return {}
+
     def close(self):
         self.conn.close()
