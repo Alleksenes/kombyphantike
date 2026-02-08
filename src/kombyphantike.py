@@ -469,6 +469,68 @@ class KombyphantikeEngine:
 
         return top_morpho + top_syntax
 
+    def _expand_word_pool(self, words_df):
+        print("Expanding word pool with semantic relations...")
+        new_rows = []
+        original_lemmas = set(words_df["Lemma"].str.lower())
+
+        # We limit the number of relations to avoid exploding the context window
+        RELATIONS_LIMIT = 5
+
+        for _, row in words_df.iterrows():
+            lemma = row["Lemma"]
+            if not lemma: continue
+
+            relations = self.db.get_relations(lemma)
+            # Flatten interesting relations
+            candidates = []
+            for rtype in ["synonyms", "related", "derived"]:
+                 candidates.extend(relations.get(rtype, []))
+
+            # Deduplicate and filter existing
+            candidates = list(set(candidates))
+            candidates = [c for c in candidates if c.lower() not in original_lemmas]
+
+            # Limit
+            candidates = candidates[:RELATIONS_LIMIT]
+
+            for new_word in candidates:
+                # Get Metadata for POS
+                meta = self.db.get_metadata(new_word)
+                pos_raw = meta.get("pos", "noun") # Default to noun if unknown?
+
+                # Map to Greek POS for consistency with generate_ai_instruction
+                pos_greek = "Ουσιαστικό"
+                if pos_raw and "verb" in pos_raw.lower(): pos_greek = "Ρήμα"
+                elif pos_raw and "adj" in pos_raw.lower(): pos_greek = "Επίθετο"
+                elif pos_raw and "adv" in pos_raw.lower(): pos_greek = "Επίρρημα"
+                elif pos_raw and "noun" in pos_raw.lower(): pos_greek = "Ουσιαστικό"
+
+                # Create a minimal row matching the schema required by generate_ai_instruction
+                # It primarily needs 'Lemma' and self.pos_col
+                new_row = row.copy() # Copy structure
+                new_row["Lemma"] = new_word
+                new_row[self.pos_col] = pos_greek
+                # Clear other fields to avoid confusion
+                new_row["Modern_Examples"] = ""
+                new_row["Greek_Def"] = ""
+                new_row["Modern_Def"] = ""
+
+                # Try to fetch definition from DB if available
+                if meta.get("definition"):
+                     new_row["Modern_Def"] = meta["definition"]
+
+                new_rows.append(new_row)
+                original_lemmas.add(new_word.lower()) # prevent re-adding
+
+        if new_rows:
+            expansion_df = pd.DataFrame(new_rows)
+            # Combine and return
+            print(f"Added {len(expansion_df)} related words to the pool.")
+            return pd.concat([words_df, expansion_df], ignore_index=True)
+
+        return words_df
+
     def compile_curriculum(self, theme, target_sentences):
         """
         THE CORE LOGIC.
@@ -497,6 +559,10 @@ class KombyphantikeEngine:
 
         # 2. Select Words & Knots
         words_df = self.select_words(theme, target_word_count)
+
+        # Expand Pool with Relations
+        words_df = self._expand_word_pool(words_df)
+
         selected_knots = self.select_strategic_knots(words_df, target_knot_count)
 
         # 3. Build Session Data
