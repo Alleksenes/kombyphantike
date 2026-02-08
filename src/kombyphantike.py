@@ -253,6 +253,9 @@ class KombyphantikeEngine:
             token_dict["paradigm"] = paradigm
 
             tokens.append(token_dict)
+
+            if paradigm:
+                logger.info(f"Paradigm for {lemma}: {paradigm[:1]}")
         return tokens
 
     def tokenize_text(self, text: str, lang: str) -> list:
