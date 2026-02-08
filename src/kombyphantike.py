@@ -593,6 +593,12 @@ class KombyphantikeEngine:
 
         # Center Node
         center_id = "center_theme"
+
+        # PRUNER: Remove the heavy 'words' list from the session data attached to the node
+        session_data_lite = session_data.copy()
+        if "words" in session_data_lite:
+            del session_data_lite["words"]
+
         nodes.append(ConstellationNode(
             id=center_id,
             label=theme,
@@ -600,8 +606,7 @@ class KombyphantikeEngine:
             status="active",
             data={
                 "instruction_text": instruction_text,
-                "session_data": session_data,
-                # ANC-> "words_df_json": words_df.to_dict(orient="records")
+                "session_data": session_data_lite,
             }
         ))
         added_node_ids.add(center_id)
