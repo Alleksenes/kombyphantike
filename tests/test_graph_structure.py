@@ -98,6 +98,13 @@ def test_compile_curriculum_graph_structure():
         assert len(graph.nodes) > 0
         assert len(graph.links) > 0
 
+        # Check Node Attributes (x, y)
+        for node in graph.nodes:
+            assert hasattr(node, "x")
+            assert hasattr(node, "y")
+            assert isinstance(node.x, float)
+            assert isinstance(node.y, float)
+
         # Check Center Node
         center_nodes = [n for n in graph.nodes if n.type == "theme"]
         assert len(center_nodes) == 1

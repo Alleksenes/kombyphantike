@@ -10,6 +10,8 @@ class ConstellationNode(BaseModel):
     label: str
     type: str  # 'lemma', 'rule', 'theme'
     status: str = "locked" # 'locked', 'unlocked', 'mastered'
+    x: float = 0.0
+    y: float = 0.0
     data: Optional[Any] = None
 
 class ConstellationLink(BaseModel):
