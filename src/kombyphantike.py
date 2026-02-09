@@ -292,7 +292,7 @@ class KombyphantikeEngine:
     def get_knot_usage(self, knot_id):
         return self.progress.get(f"KNOT_{knot_id}", {}).get("count", 0)
 
-    def select_words(self, theme, target_word_count, target_level="Any"):
+    def select_words(self, theme, target_word_count, target_level="Any", complexity="lucid"):
         print(f"Curating ~{target_word_count} words for theme: '{theme}' (Level: {target_level})...")
 
         # 1. Map Level to KDS Scores
@@ -303,6 +303,13 @@ class KombyphantikeEngine:
             "Any": (0, 100)
         }
         min_kds, max_kds = level_map.get(target_level, (0, 100))
+
+        # Complexity Adjustment (Only if level is Any, to avoid conflict)
+        if target_level == "Any":
+            if complexity == "lucid":
+                max_kds = 30
+            elif complexity == "complex":
+                min_kds = 50
 
         # 2. Try DB Selection (The "Smart & Forgiving" Strategy)
         db_candidates = self.db.select_words(theme, min_kds, max_kds, limit=target_word_count * 4)
@@ -331,6 +338,7 @@ class KombyphantikeEngine:
                     "Modern_Def": r.get("modern_def", ""),
                     "Greek_Def": r.get("greek_def", ""), # Safe access
                     "Shift_Type": r.get("shift_type", ""),
+                    "Etymology": r.get("etymology_text", ""),
                     "Freq_Score": r.get("frequency_score", 0.5), # Default mid-freq
                     "KDS_Score": r.get("kds_score", 50),
                     "Modern_Examples": "", # Not in DB result
@@ -521,13 +529,15 @@ class KombyphantikeEngine:
 
         return top_morpho + top_syntax
 
-    def _expand_word_pool(self, words_df):
+    def _expand_word_pool(self, words_df, complexity="lucid"):
         print("Expanding word pool with semantic relations...")
         new_rows = []
         original_lemmas = set(words_df["Lemma"].str.lower())
 
-        # We limit the number of relations to avoid exploding the context window
-        RELATIONS_LIMIT = 5
+        # Complexity Limit
+        RELATIONS_LIMIT = 2
+        if complexity == "complex":
+            RELATIONS_LIMIT = 6
 
         for _, row in words_df.iterrows():
             lemma = row["Lemma"]
@@ -574,6 +584,12 @@ class KombyphantikeEngine:
                 if meta.get("definition"):
                      new_row["Modern_Def"] = meta["definition"]
 
+                # Try to fetch etymology
+                if meta.get("etymology_text"):
+                    new_row["Etymology"] = meta["etymology_text"]
+                else:
+                    new_row["Etymology"] = ""
+
                 if new_row is not None:
                     new_rows.append(new_row)
 
@@ -614,10 +630,10 @@ class KombyphantikeEngine:
         print(f"Corpus Size: {len(corpus)} sentences.")
 
         # 2. Select Words & Knots
-        words_df = self.select_words(theme, target_word_count, target_level)
+        words_df = self.select_words(theme, target_word_count, target_level, complexity)
 
         # Expand Pool with Relations
-        words_df = self._expand_word_pool(words_df)
+        words_df = self._expand_word_pool(words_df, complexity)
 
         selected_knots = self.select_strategic_knots(words_df, target_knot_count)
 
@@ -840,7 +856,15 @@ class KombyphantikeEngine:
     def generate_ai_instruction(self, theme, count, words_df, target_level="Any", complexity="lucid"):
         pool_text = []
         for pos, group in words_df.groupby(self.pos_col):
-            lemmas = ", ".join(group["Lemma"].tolist())
+
+            if complexity == "complex":
+                 lemmas = ", ".join([
+                     f"{row['Lemma']} (Etym: {row['Etymology']})" if row.get('Etymology') else row['Lemma']
+                     for _, row in group.iterrows()
+                 ])
+            else:
+                 lemmas = ", ".join(group["Lemma"].tolist())
+
             clean_pos = (
                 str(pos)
                 .replace("Ουσιαστικό", "Nouns")
@@ -851,6 +875,12 @@ class KombyphantikeEngine:
             pool_text.append(f"**{clean_pos}**: {lemmas}")
         pool_string = "\n".join(pool_text)
 
+        complexity_instruction = ""
+        if complexity == "lucid":
+            complexity_instruction = "Write clear, simple sentences suitable for learners. Prioritize clarity over density."
+        elif complexity == "complex":
+            complexity_instruction = "Write sophisticated, philologically rich sentences. Use the provided etymologies to inform the nuance."
+
         text = f"""
 ### SYSTEM OVERRIDE: KOMBYPHANTIKE MOBILE ENGINE ###
 
@@ -859,6 +889,8 @@ class KombyphantikeEngine:
 **THEME:** {theme}
 **TARGET LEVEL:** {target_level}
 **COMPLEXITY:** {complexity}
+
+{complexity_instruction}
 
 ### THE RAW MATERIALS
 You must prioritize these words in your sentences:

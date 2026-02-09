@@ -62,7 +62,7 @@ class DatabaseManager:
             
             # THE CRITICAL FIX: SELECT *ALL* THE COLUMNS WE NEED
             query = """
-                SELECT l.pos, l.ipa, l.greek_def, l.english_def, l.shift_type, l.semantic_warning, lsj.entry_json
+                SELECT l.pos, l.ipa, l.greek_def, l.english_def, l.shift_type, l.semantic_warning, l.etymology_text, lsj.entry_json
                 FROM lemmas l
                 LEFT JOIN lsj_entries lsj ON l.lsj_id = lsj.id
                 WHERE l.lemma_text = ?
@@ -109,6 +109,7 @@ class DatabaseManager:
                 "definition": definition,
                 "shift_type": row["shift_type"],
                 "semantic_warning": row["semantic_warning"],
+                "etymology_text": row["etymology_text"] or "",
                 "ancient_context": ancient_context
             }
 
