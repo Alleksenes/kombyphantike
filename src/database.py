@@ -56,13 +56,30 @@ class DatabaseManager:
             logger.error(f"DB Error in get_paradigm for '{lemma}': {e}")
             return []
 
+    def select_words(self, theme: str) -> list:
+        try:
+            cursor = self.conn.cursor()
+            query = """
+                SELECT lemma_text
+                FROM lemmas
+                WHERE lemma_text LIKE ? OR modern_def LIKE ? OR greek_def LIKE ?
+            """
+            wildcard_theme = f"%{theme}%"
+            cursor.execute(query, (wildcard_theme, wildcard_theme, wildcard_theme))
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+        except Exception as e:
+            logger.error(f"DB Error in select_words for '{theme}': {e}")
+            return []
+
     def get_metadata(self, lemma):
         try:
             cursor = self.conn.cursor()
             
             # THE CRITICAL FIX: SELECT *ALL* THE COLUMNS WE NEED
+            # Changed english_def to modern_def as per schema
             query = """
-                SELECT l.pos, l.ipa, l.greek_def, l.english_def, l.shift_type, l.semantic_warning, lsj.entry_json
+                SELECT l.pos, l.ipa, l.greek_def, l.modern_def, l.shift_type, l.semantic_warning, lsj.entry_json
                 FROM lemmas l
                 LEFT JOIN lsj_entries lsj ON l.lsj_id = lsj.id
                 WHERE l.lemma_text = ?
@@ -74,7 +91,7 @@ class DatabaseManager:
                 return {"definition": "Not found in database."}
 
             # Prioritize English definition, fallback to Greek
-            definition = row["english_def"] if row["english_def"] else row["greek_def"]
+            definition = row["modern_def"] if row["modern_def"] else row["greek_def"]
 
             # Robust Jewel Mining for Ancient Context
             ancient_context = None
