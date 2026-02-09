@@ -22,3 +22,4 @@ class ConstellationLink(BaseModel):
 class ConstellationGraph(BaseModel):
     nodes: List[ConstellationNode]
     links: List[ConstellationLink]
+    golden_path: List[str] = []
