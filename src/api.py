@@ -21,6 +21,8 @@ logger = logging.getLogger("kombyphantike-api")
 class CurriculumRequest(BaseModel):
     theme: str
     sentence_count: int = 5
+    target_level: str = "Any"  # "A1", "B2", "C1", or "Any"
+    complexity: str = "lucid"  # "lucid" (simple) or "complex" (detailed)
 
 app = FastAPI(title="Kombyphantike API", version="0.2.0")
 
@@ -168,7 +170,12 @@ async def draft_curriculum(request: CurriculumRequest): # Use the Pydantic model
         logger.info(f"Drafting: {request.theme}")
         # Call core logic WITHOUT AI
         # engine.compile_curriculum now returns ConstellationGraph
-        graph = engine.compile_curriculum(request.theme, request.sentence_count)
+        graph = engine.compile_curriculum(
+            request.theme,
+            request.sentence_count,
+            target_level=request.target_level,
+            complexity=request.complexity
+        )
 
         # Return the structure directly
         return graph
