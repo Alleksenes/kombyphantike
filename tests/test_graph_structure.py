@@ -6,6 +6,7 @@ import pandas as pd
 # Mock modules before importing src.kombyphantike
 sys.modules["spacy"] = MagicMock()
 sys.modules["sentence_transformers"] = MagicMock()
+sys.modules["transliterate"] = MagicMock()
 # We need to mock src.database before importing src.kombyphantike if it's imported at top level
 # But src.kombyphantike imports DatabaseManager from src.database
 sys.modules["src.database"] = MagicMock()

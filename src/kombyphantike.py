@@ -765,7 +765,8 @@ class KombyphantikeEngine:
                         "english_meaning": hero_row.get("English_Meaning") or hero_row.get("Definition"),
                         "pos": hero_row.get("POS"),
                         "etymology": hero_row.get("Etymology"),
-                        "frequency_score": hero_row.get("Frequency_Score") # Or whatever your column name is
+                        "frequency_score": hero_row.get("Frequency_Score"), # Or whatever your column name is
+                        "kds_score": hero_row.get("KDS_Score", 50)
                     }
                     nodes.append(ConstellationNode(
                         id=word_id,
@@ -793,7 +794,34 @@ class KombyphantikeEngine:
                     # Link Word -> Rule
                     links.append(ConstellationLink(source=word_id, target=rule_id, value=0.5))
 
-        return ConstellationGraph(nodes=nodes, links=links)
+        # --- GOLDEN PATH LOGIC ---
+        # 1. Start with Center
+        golden_path = [center_id]
+
+        # 2. Get Lemma Nodes and Sort by KDS Score (Easiest First)
+        lemma_nodes = [n for n in nodes if n.type == "lemma"]
+
+        def get_score(n):
+            try:
+                return float(n.data.get("kds_score", 50))
+            except:
+                return 50.0
+
+        lemma_nodes.sort(key=get_score)
+
+        # 3. Interleave: Lemma -> Its Children Rules
+        for lemma_node in lemma_nodes:
+            golden_path.append(lemma_node.id)
+
+            # Find children rules linked to this lemma
+            # Rule nodes are targets where source is lemma_node.id
+            child_rules = [
+                l.target for l in links
+                if l.source == lemma_node.id
+            ]
+            golden_path.extend(child_rules)
+
+        return ConstellationGraph(nodes=nodes, links=links, golden_path=golden_path)
 
     def _check_paradigm_for_plural(self, lemma):
         paradigm = self.db.get_paradigm(lemma)
