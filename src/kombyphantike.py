@@ -292,46 +292,97 @@ class KombyphantikeEngine:
     def get_knot_usage(self, knot_id):
         return self.progress.get(f"KNOT_{knot_id}", {}).get("count", 0)
 
-    def select_words(self, theme, target_word_count):
-        print(f"Curating ~{target_word_count} words for theme: '{theme}'...")
-        candidates = self.kelly.copy()
+    def select_words(self, theme, target_word_count, target_level="Any"):
+        print(f"Curating ~{target_word_count} words for theme: '{theme}' (Level: {target_level})...")
 
-        # Semantic Scoring Logic
-        if self.use_transformer:
-            from sentence_transformers import util
+        # 1. Map Level to KDS Scores
+        level_map = {
+            "A1": (0, 15),
+            "B1": (25, 40),
+            "C2": (60, 100),
+            "Any": (0, 100)
+        }
+        min_kds, max_kds = level_map.get(target_level, (0, 100))
 
-            candidates["Target_Def"] = candidates["Greek_Def"].fillna(
-                candidates["Modern_Def"]
-            )
-            theme_emb = self.model.encode(theme, convert_to_tensor=True)
+        # 2. Try DB Selection (The "Smart & Forgiving" Strategy)
+        db_candidates = self.db.select_words(theme, min_kds, max_kds, limit=target_word_count * 4)
 
-            if self.vectors is not None:
-                # Use pre-computed
-                all_scores = util.cos_sim(theme_emb, self.vectors)[0].cpu().numpy()
-                candidates["Semantic_Score"] = all_scores
-                candidates = candidates[
-                    candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
-                ]
-            else:
-                # Live compute
-                candidates = candidates[
-                    candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
-                ]
-                definitions = candidates["Target_Def"].tolist()
-                corpus_emb = self.model.encode(definitions, convert_to_tensor=True)
-                scores = util.cos_sim(theme_emb, corpus_emb)[0].cpu().numpy()
-                candidates["Semantic_Score"] = scores
-        else:
-            # Fallback to Spacy
-            theme_doc = self.nlp(theme)
-            candidates = candidates[candidates["Modern_Def"].notna()]
-            candidates["Semantic_Score"] = candidates["Modern_Def"].apply(
-                lambda text: (
-                    theme_doc.similarity(self.nlp(text))
-                    if isinstance(text, str)
-                    else 0.0
+        candidates = None
+
+        if db_candidates:
+            print(f"Database found {len(db_candidates)} candidates.")
+            # Convert to DataFrame matching self.kelly schema
+            rows = []
+            for r in db_candidates:
+                # Map POS: "noun" -> "Ουσιαστικό", etc.
+                pos_raw = r.get("pos", "").lower() if r.get("pos") else ""
+                pos_greek = "Ουσιαστικό" # Default
+                if "verb" in pos_raw: pos_greek = "Ρήμα"
+                elif "adj" in pos_raw: pos_greek = "Επίθετο"
+                elif "adv" in pos_raw: pos_greek = "Επίρρημα"
+                elif "noun" in pos_raw: pos_greek = "Ουσιαστικό"
+                elif "conj" in pos_raw: pos_greek = "Σύνδεσμος"
+                elif "prep" in pos_raw: pos_greek = "Πρόθεση"
+
+                # Construct Row
+                row = {
+                    "Lemma": r["lemma_text"],
+                    self.pos_col: pos_greek,
+                    "Modern_Def": r.get("modern_def", ""),
+                    "Greek_Def": r.get("greek_def", ""), # Safe access
+                    "Shift_Type": r.get("shift_type", ""),
+                    "Freq_Score": r.get("frequency_score", 0.5), # Default mid-freq
+                    "KDS_Score": r.get("kds_score", 50),
+                    "Modern_Examples": "", # Not in DB result
+                    "Semantic_Score": 1.0, # It matched the query, so it's relevant
+                    "Heritage_Score": 0.5, # Default, will be recalculated if logic persists
+                    "ID": 0 # Dummy
+                }
+                rows.append(row)
+
+            candidates = pd.DataFrame(rows)
+
+        # 3. Fallback to Full Scan (The "Semantic" Strategy)
+        if candidates is None or len(candidates) == 0:
+            print("Database yield empty. Falling back to semantic scan...")
+            candidates = self.kelly.copy()
+
+            # Semantic Scoring Logic
+            if self.use_transformer:
+                from sentence_transformers import util
+
+                candidates["Target_Def"] = candidates["Greek_Def"].fillna(
+                    candidates["Modern_Def"]
                 )
-            )
+                theme_emb = self.model.encode(theme, convert_to_tensor=True)
+
+                if self.vectors is not None:
+                    # Use pre-computed
+                    all_scores = util.cos_sim(theme_emb, self.vectors)[0].cpu().numpy()
+                    candidates["Semantic_Score"] = all_scores
+                    candidates = candidates[
+                        candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
+                    ]
+                else:
+                    # Live compute
+                    candidates = candidates[
+                        candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
+                    ]
+                    definitions = candidates["Target_Def"].tolist()
+                    corpus_emb = self.model.encode(definitions, convert_to_tensor=True)
+                    scores = util.cos_sim(theme_emb, corpus_emb)[0].cpu().numpy()
+                    candidates["Semantic_Score"] = scores
+            else:
+                # Fallback to Spacy
+                theme_doc = self.nlp(theme)
+                candidates = candidates[candidates["Modern_Def"].notna()]
+                candidates["Semantic_Score"] = candidates["Modern_Def"].apply(
+                    lambda text: (
+                        theme_doc.similarity(self.nlp(text))
+                        if isinstance(text, str)
+                        else 0.0
+                    )
+                )
 
         # Heritage Scoring
         def calc_heritage(row):
@@ -563,7 +614,7 @@ class KombyphantikeEngine:
         print(f"Corpus Size: {len(corpus)} sentences.")
 
         # 2. Select Words & Knots
-        words_df = self.select_words(theme, target_word_count)
+        words_df = self.select_words(theme, target_word_count, target_level)
 
         # Expand Pool with Relations
         words_df = self._expand_word_pool(words_df)
@@ -859,13 +910,13 @@ DO NOT return the Kelly statistics, frequency data, or etymology.
             )
         return csv_rows
 
-    def generate_worksheet(self, theme, target_sentences):
+    def generate_worksheet(self, theme, target_sentences, target_level="Any", complexity="lucid"):
         """
         CLI Entry Point.
         Generates data, saves to CSV, saves prompt to TXT.
         """
         # 1. Compile Graph
-        graph = self.compile_curriculum(theme, target_sentences)
+        graph = self.compile_curriculum(theme, target_sentences, target_level, complexity)
 
         # 2. Extract Data from Graph
         center_node = next(n for n in graph.nodes if n.type == "theme")
@@ -923,4 +974,9 @@ if __name__ == "__main__":
         c = int(input("Enter number of sentences (e.g. 60): "))
     except ValueError:
         c = 60
-    engine.generate_worksheet(t, c)
+
+    level = input("Enter Target Level (A1, B1, C2, Any) [default: Any]: ").strip()
+    if not level:
+        level = "Any"
+
+    engine.generate_worksheet(t, c, level)

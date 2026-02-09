@@ -154,5 +154,25 @@ class DatabaseManager:
             logger.error(f"DB Error in get_relations for '{lemma_text}': {e}")
             return {}
 
+    def select_words(self, theme: str, min_kds: int, max_kds: int, limit: int) -> list:
+        try:
+            cursor = self.conn.cursor()
+            query = """
+                SELECT * FROM lemmas
+                WHERE (
+                    lemma_text LIKE '%' || ? || '%'
+                    OR modern_def LIKE '%' || ? || '%'
+                )
+                AND kds_score BETWEEN ? AND ?
+                ORDER BY kds_score ASC
+                LIMIT ?
+            """
+            cursor.execute(query, (theme, theme, min_kds, max_kds, limit))
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"DB Error in select_words for theme '{theme}': {e}")
+            return []
+
     def close(self):
         self.conn.close()
