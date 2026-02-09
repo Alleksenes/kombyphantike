@@ -294,7 +294,16 @@ class KombyphantikeEngine:
 
     def select_words(self, theme, target_word_count):
         print(f"Curating ~{target_word_count} words for theme: '{theme}'...")
-        candidates = self.kelly.copy()
+
+        # 1. Database Search (Relaxed Query)
+        matching_lemmas = self.db.select_words(theme)
+
+        if matching_lemmas:
+            candidates = self.kelly[self.kelly["Lemma"].isin(matching_lemmas)].copy()
+            print(f"Database found {len(candidates)} candidates.")
+        else:
+            print("Warning: No words found via database search. Falling back to full semantic scan.")
+            candidates = self.kelly.copy()
 
         # Semantic Scoring Logic
         if self.use_transformer:
@@ -306,21 +315,26 @@ class KombyphantikeEngine:
             theme_emb = self.model.encode(theme, convert_to_tensor=True)
 
             if self.vectors is not None:
-                # Use pre-computed
+                # Use pre-computed (Full Corpus)
                 all_scores = util.cos_sim(theme_emb, self.vectors)[0].cpu().numpy()
-                candidates["Semantic_Score"] = all_scores
+                # Subset scores using the candidate indices (which preserve original Kelly indices)
+                candidates["Semantic_Score"] = all_scores[candidates.index]
+
                 candidates = candidates[
                     candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
                 ]
             else:
-                # Live compute
+                # Live compute (Subset)
                 candidates = candidates[
                     candidates["Target_Def"].notna() & (candidates["Target_Def"] != "")
                 ]
-                definitions = candidates["Target_Def"].tolist()
-                corpus_emb = self.model.encode(definitions, convert_to_tensor=True)
-                scores = util.cos_sim(theme_emb, corpus_emb)[0].cpu().numpy()
-                candidates["Semantic_Score"] = scores
+                if not candidates.empty:
+                    definitions = candidates["Target_Def"].tolist()
+                    corpus_emb = self.model.encode(definitions, convert_to_tensor=True)
+                    scores = util.cos_sim(theme_emb, corpus_emb)[0].cpu().numpy()
+                    candidates["Semantic_Score"] = scores
+                else:
+                    candidates["Semantic_Score"] = 0.0
         else:
             # Fallback to Spacy
             theme_doc = self.nlp(theme)
