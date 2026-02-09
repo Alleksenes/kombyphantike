@@ -536,7 +536,7 @@ class KombyphantikeEngine:
 
         return words_df
 
-    def compile_curriculum(self, theme, target_sentences):
+    def compile_curriculum(self, theme, target_sentences, target_level="Any", complexity="lucid"):
         """
         THE CORE LOGIC.
         Returns a ConstellationGraph object.
@@ -582,7 +582,7 @@ class KombyphantikeEngine:
 
         # 4. Generate Instruction Text
         instruction_text = self.generate_ai_instruction(
-            theme, target_sentences, words_df
+            theme, target_sentences, words_df, target_level, complexity
         )
 
         # 5. Build Graph
@@ -786,7 +786,7 @@ class KombyphantikeEngine:
 
         return "NO_CONTEXT_FOUND"
 
-    def generate_ai_instruction(self, theme, count, words_df):
+    def generate_ai_instruction(self, theme, count, words_df, target_level="Any", complexity="lucid"):
         pool_text = []
         for pos, group in words_df.groupby(self.pos_col):
             lemmas = ", ".join(group["Lemma"].tolist())
@@ -806,6 +806,8 @@ class KombyphantikeEngine:
 **ROLE:** You are the AI Engine for a high-level Greek Philology App.
 **TASK:** Populate the provided JSON Data Structure with sentences.
 **THEME:** {theme}
+**TARGET LEVEL:** {target_level}
+**COMPLEXITY:** {complexity}
 
 ### THE RAW MATERIALS
 You must prioritize these words in your sentences:
