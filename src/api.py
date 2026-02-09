@@ -178,48 +178,52 @@ async def draft_curriculum(request: CurriculumRequest): # Use the Pydantic model
 
 @app.post("/fill_curriculum")
 def fill_curriculum(request: FillRequest):
-    """
-    STEP 2: The Weave.
-    Prunes the data to prevent Gemini from choking on Kelly metadata.
-    """
     if not engine:
         raise HTTPException(500, "Engine not ready")
 
     try:
-        logger.info(f"Preparing to fill {len(request.worksheet_data)} nodes with AI...")
+        logger.info("Filling curriculum with AI...")
 
-        # --- THE PRUNER: Remove the Slop ---
-        # We only send what the AI needs to write the sentences.
-        lean_data = []
-        for row in request.worksheet_data:
-            # Check for various lemma keys (lemma_text, lemma, etc)
-            lemma = row.get("lemma_text") or row.get("lemma") or row.get("id")
-            
-            # Extract only the essentials
-            lean_row = {
-                "id": row.get("id"),
-                "lemma": lemma,
-                "knot_rule": row.get("knot_definition") or row.get("knot_rule"),
-                "theme": os.environ.get("CURRENT_THEME", "General") # Context
-            }
-            
-            # Flatten ancient_context if it's a dict to save tokens
-            actx = row.get("ancient_context")
-            if isinstance(actx, dict):
-                # JEWEL PRESERVATION: Provide the actual text to inspire the AI
-                author = actx.get('author', 'Unknown')
-                work = actx.get('work', '')
-                greek = actx.get('greek', '')
-                translation = actx.get('translation', '')
-                lean_row["ancient_context"] = f"{author} ({work}): {greek} - {translation}"
-            elif isinstance(actx, str) and actx:
-                lean_row["ancient_context"] = actx
-            
-            lean_data.append(lean_row)
+        # STEP 1: CREATE A MAP TO REMEMBER THE RICH DATA
+        # We assume request.worksheet_data is a list of Nodes (dicts)
+        rich_map = {node['id']: node for node in request.worksheet_data}
 
-        # Use the LEAN data for the prompt
-        rows_json = json.dumps(lean_data, indent=2)
-        
+        # STEP 2: PRUNE THE DATA FOR THE AI
+        lean_worksheet = []
+        for node in request.worksheet_data:
+            if node.get('type') == 'rule':
+                # Extract data from the nested 'data' dict if present
+                node_data = node.get("data", {})
+
+                # Only send the AI what it needs to fill
+                lean_row = {
+                    "id": node.get("id"),
+                    "knot_definition": node_data.get("knot_definition"),
+                    "lemma": node.get("label"),
+                    "source_sentence": "", # Empty field for AI
+                    "target_sentence": ""  # Empty field for AI
+                }
+
+                # Handle ancient_context carefully
+                actx = node_data.get("ancient_context")
+                if isinstance(actx, dict):
+                    # JEWEL PRESERVATION: Provide the actual text to inspire the AI
+                    author = actx.get('author', 'Unknown')
+                    work = actx.get('work', '')
+                    greek = actx.get('greek', '')
+                    translation = actx.get('translation', '')
+                    lean_row["ancient_context"] = f"{author} ({work}): {greek} - {translation}"
+                elif isinstance(actx, str) and actx:
+                    lean_row["ancient_context"] = actx
+
+                lean_worksheet.append(lean_row)
+
+        if not lean_worksheet:
+            # If there are no rules to fill, return the original data.
+            return {"worksheet_data": request.worksheet_data}
+
+        # STEP 3: CALL THE AI WITH THE LEAN DATA
+        rows_json = json.dumps(lean_worksheet, indent=2)
         full_prompt = (
             request.instruction_text + 
             "\n\n### DATA TO COMPLETE ###\n" + 
@@ -227,36 +231,38 @@ def fill_curriculum(request: FillRequest):
             rows_json
         )
 
-        # Call AI
         filled_rows = call_gemini(full_prompt)
 
+        # STEP 4: MERGE THE AI'S RESPONSE BACK INTO THE RICH DATA
         if isinstance(filled_rows, list):
-            # --- THE WEAVER: Merge AI results back into the RICH data ---
-            # We map by 'id' to ensure we don't lose the Kelly stats in the final response
-            rich_map = {str(r['id']): r for r in request.worksheet_data}
-            
-            final_output = []
-            for a_row in filled_rows:
-                node_id = str(a_row.get("id"))
-                if node_id in rich_map:
-                    target_node = rich_map[node_id]
+            for filled_row in filled_rows:
+                row_id = filled_row.get("id")
+                if row_id in rich_map:
+                    # Update the 'data' dictionary of the original rich node
+                    # Ensure 'data' exists
+                    if "data" not in rich_map[row_id] or rich_map[row_id]["data"] is None:
+                         rich_map[row_id]["data"] = {}
+
+                    target_data = rich_map[row_id]['data']
                     
-                    # Update the node with AI generation
-                    target_node["target_sentence"] = a_row.get("target_sentence")
-                    target_node["source_sentence"] = a_row.get("source_sentence")
-                    target_node["knot_context"] = a_row.get("knot_context")
+                    target_data['source_sentence'] = filled_row.get('source_sentence')
+                    target_data['target_sentence'] = filled_row.get('target_sentence')
+                    target_data['knot_context'] = filled_row.get('knot_context')
                     
                     # Tokenize the new sentence
-                    greek_text = target_node["target_sentence"]
+                    greek_text = target_data.get("target_sentence")
                     if greek_text:
-                        target_node["target_tokens"] = engine.tokenize_text(greek_text, "el")
-                        target_node["target_transliteration"] = engine.transliterate_sentence(greek_text)
+                        target_data["target_tokens"] = engine.tokenize_text(greek_text, "el")
+                        target_data["target_transliteration"] = engine.transliterate_sentence(greek_text)
                     
-                    final_output.append(target_node)
+                    # Tokenize the source sentence
+                    english_text = target_data.get("source_sentence")
+                    if english_text:
+                        target_data["source_tokens"] = engine.tokenize_text(english_text, "en")
 
-            return {"worksheet_data": final_output}
-        else:
-            raise ValueError("AI returned invalid JSON structure (not a list)")
+        # STEP 5: RETURN THE FULL, MERGED DATA
+        final_worksheet = list(rich_map.values())
+        return {"worksheet_data": final_worksheet}
 
     except Exception as e:
         logger.error(f"Fill Error: {e}")
