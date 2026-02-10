@@ -131,10 +131,41 @@ def infer_difficulty_scores():
     # 3. Update in bulk
     logging.info("Updating database...")
     cursor.executemany("UPDATE lemmas SET kds_score = ? WHERE id = ?", updates)
+    conn.commit()  # Ensure initial scores are saved
 
-    conn.commit()
+    # 4. Second Pass: KDS Inheritance
+    logging.info("Starting KDS Inheritance Pass...")
+
+    # Query relations where child's score is worse (higher) than parent's
+    query = """
+        SELECT child.id, child.kds_score, parent.kds_score
+        FROM relations r
+        JOIN lemmas child ON r.child_lemma_id = child.id
+        JOIN lemmas parent ON r.parent_lemma_text = parent.lemma_text
+        WHERE r.relation_type = 'form_of'
+          AND child.kds_score > parent.kds_score
+    """
+
+    cursor.execute(query)
+    inheritance_candidates = cursor.fetchall()
+
+    if inheritance_candidates:
+        logging.info(f"Found {len(inheritance_candidates)} candidates for KDS inheritance.")
+
+        inheritance_updates = []
+        for row in inheritance_candidates:
+            child_id = row[0]
+            parent_score = row[2]
+            inheritance_updates.append((parent_score, child_id))
+
+        logging.info(f"Applying {len(inheritance_updates)} KDS inheritance updates...")
+        cursor.executemany("UPDATE lemmas SET kds_score = ? WHERE id = ?", inheritance_updates)
+        conn.commit()
+    else:
+        logging.info("No KDS inheritance updates needed.")
+
     conn.close()
-    logging.info(f"Done. Updated {len(updates)} lemmas.")
+    logging.info(f"Done. Initial update: {len(updates)} lemmas. Inheritance update: {len(inheritance_candidates) if inheritance_candidates else 0} lemmas.")
 
 if __name__ == "__main__":
     infer_difficulty_scores()
