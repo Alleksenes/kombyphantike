@@ -62,7 +62,7 @@ class DatabaseManager:
             
             # THE CRITICAL FIX: SELECT *ALL* THE COLUMNS WE NEED
             query = """
-                SELECT l.pos, l.ipa, l.greek_def, l.english_def, l.shift_type, l.semantic_warning, l.etymology_text, lsj.entry_json
+                SELECT l.id, l.pos, l.ipa, l.greek_def, l.english_def, l.shift_type, l.semantic_warning, l.etymology_text, lsj.entry_json
                 FROM lemmas l
                 LEFT JOIN lsj_entries lsj ON l.lsj_id = lsj.id
                 WHERE l.lemma_text = ?
@@ -75,6 +75,67 @@ class DatabaseManager:
 
             # Prioritize English definition, fallback to Greek
             definition = row["english_def"] if row["english_def"] else row["greek_def"]
+            etymology_text = row["etymology_text"]
+            lemma_id = row["id"]
+
+            # Parent Inheritance Logic
+            # Check if this lemma is a form of another lemma (the parent)
+            cursor.execute("""
+                SELECT parent_lemma_text
+                FROM relations
+                WHERE child_lemma_id = ? AND relation_type = 'form_of'
+            """, (lemma_id,))
+
+            parent_rel = cursor.fetchone()
+
+            target_lemma_for_gender = lemma
+            target_id_for_gender = lemma_id
+
+            if parent_rel:
+                parent_lemma = parent_rel[0]
+
+                # Fetch Parent Metadata
+                cursor.execute("""
+                    SELECT id, english_def, greek_def, etymology_text
+                    FROM lemmas
+                    WHERE lemma_text = ?
+                """, (parent_lemma,))
+
+                parent_row = cursor.fetchone()
+
+                if parent_row:
+                    # Inherit Definition if missing in child
+                    if not definition:
+                        definition = parent_row["english_def"] if parent_row["english_def"] else parent_row["greek_def"]
+
+                    # Inherit Etymology if missing in child
+                    if not etymology_text:
+                        etymology_text = parent_row["etymology_text"]
+
+                    # Switch target for gender lookup to Parent
+                    target_lemma_for_gender = parent_lemma
+                    target_id_for_gender = parent_row["id"]
+
+            # Gender Lookup
+            # We look for the form entry that matches the target lemma text (canonical form)
+            # This is where gender tags usually live (e.g. for nouns)
+            gender = None
+            cursor.execute("""
+                SELECT tags_json
+                FROM forms
+                WHERE lemma_id = ? AND form_text = ?
+            """, (target_id_for_gender, target_lemma_for_gender))
+
+            form_row = cursor.fetchone()
+            if form_row and form_row["tags_json"]:
+                try:
+                    tags = json.loads(form_row["tags_json"])
+                    for tag in tags:
+                        if tag in ["masculine", "feminine", "neuter"]:
+                            gender = tag
+                            break
+                except json.JSONDecodeError:
+                    pass
 
             # Robust Jewel Mining for Ancient Context
             ancient_context = None
@@ -103,15 +164,20 @@ class DatabaseManager:
                  ancient_context = {"author": "LSJ", "greek": "No direct citation found.", "translation": ""}
 
 
-            return {
+            result = {
                 "pos": row["pos"],
                 "ipa": row["ipa"],
                 "definition": definition,
                 "shift_type": row["shift_type"],
                 "semantic_warning": row["semantic_warning"],
-                "etymology_text": row["etymology_text"] or "",
+                "etymology_text": etymology_text or "",
                 "ancient_context": ancient_context
             }
+
+            if gender:
+                result["gender"] = gender
+
+            return result
 
         except Exception as e:
             logger.error(f"DB Error in get_metadata for '{lemma}': {e}")
