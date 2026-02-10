@@ -1,10 +1,11 @@
-import sqlite3
 import json
 import logging
-from pathlib import Path
+import sqlite3
+
 from src.config import PROCESSED_DIR
 
 logger = logging.getLogger(__name__)
+
 
 class DatabaseManager:
     def __init__(self):
@@ -16,21 +17,24 @@ class DatabaseManager:
         try:
             cursor = self.conn.cursor()
             target_id = None
-            
+
             # 1. Direct Lemma Lookup
             cursor.execute("SELECT id FROM lemmas WHERE lemma_text = ?", (lemma,))
             row = cursor.fetchone()
             if row:
                 target_id = row[0]
-            
+
             # 2. 'form_of' Redirect Lookup
             if not target_id:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT l.id FROM relations r
                     JOIN lemmas child ON r.child_lemma_id = child.id
                     JOIN lemmas l ON r.parent_lemma_text = l.lemma_text
                     WHERE child.lemma_text = ? AND r.relation_type = 'form_of'
-                """, (lemma,))
+                """,
+                    (lemma,),
+                )
                 parent_row = cursor.fetchone()
                 if parent_row:
                     target_id = parent_row[0]
@@ -39,7 +43,10 @@ class DatabaseManager:
                 return []
 
             # 3. Fetch all forms for the resolved lemma ID
-            cursor.execute("SELECT form_text, tags_json FROM forms WHERE lemma_id = ?", (target_id,))
+            cursor.execute(
+                "SELECT form_text, tags_json FROM forms WHERE lemma_id = ?",
+                (target_id,),
+            )
             rows = cursor.fetchall()
 
             paradigm = []
@@ -49,7 +56,7 @@ class DatabaseManager:
                 if r["form_text"] == lemma:
                     entry["is_current_form"] = True
                 paradigm.append(entry)
-            
+
             return paradigm
 
         except Exception as e:
@@ -59,10 +66,10 @@ class DatabaseManager:
     def get_metadata(self, lemma):
         try:
             cursor = self.conn.cursor()
-            
+
             # THE CRITICAL FIX: SELECT *ALL* THE COLUMNS WE NEED
             query = """
-                SELECT l.id, l.pos, l.ipa, l.greek_def, l.english_def, l.shift_type, l.semantic_warning, l.etymology_text, lsj.entry_json
+                SELECT l.id, l.pos, l.ipa, l.greek_def, l.english_def, l.shift_type, l.semantic_warning, l.etymology, lsj.entry_json
                 FROM lemmas l
                 LEFT JOIN lsj_entries lsj ON l.lsj_id = lsj.id
                 WHERE l.lemma_text = ?
@@ -80,11 +87,14 @@ class DatabaseManager:
 
             # Parent Inheritance Logic
             # Check if this lemma is a form of another lemma (the parent)
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT parent_lemma_text
                 FROM relations
                 WHERE child_lemma_id = ? AND relation_type = 'form_of'
-            """, (lemma_id,))
+            """,
+                (lemma_id,),
+            )
 
             parent_rel = cursor.fetchone()
 
@@ -95,18 +105,25 @@ class DatabaseManager:
                 parent_lemma = parent_rel[0]
 
                 # Fetch Parent Metadata
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id, english_def, greek_def, etymology_text
                     FROM lemmas
                     WHERE lemma_text = ?
-                """, (parent_lemma,))
+                """,
+                    (parent_lemma,),
+                )
 
                 parent_row = cursor.fetchone()
 
                 if parent_row:
                     # Inherit Definition if missing in child
                     if not definition:
-                        definition = parent_row["english_def"] if parent_row["english_def"] else parent_row["greek_def"]
+                        definition = (
+                            parent_row["english_def"]
+                            if parent_row["english_def"]
+                            else parent_row["greek_def"]
+                        )
 
                     # Inherit Etymology if missing in child
                     if not etymology_text:
@@ -120,11 +137,14 @@ class DatabaseManager:
             # We look for the form entry that matches the target lemma text (canonical form)
             # This is where gender tags usually live (e.g. for nouns)
             gender = None
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT tags_json
                 FROM forms
                 WHERE lemma_id = ? AND form_text = ?
-            """, (target_id_for_gender, target_lemma_for_gender))
+            """,
+                (target_id_for_gender, target_lemma_for_gender),
+            )
 
             form_row = cursor.fetchone()
             if form_row and form_row["tags_json"]:
@@ -152,17 +172,20 @@ class DatabaseManager:
                                         "author": cit.get("author"),
                                         "work": cit.get("work", ""),
                                         "greek": cit.get("text"),
-                                        "translation": cit.get("translation", "")
+                                        "translation": cit.get("translation", ""),
                                     }
-                                    break # Found a good one, stop searching
+                                    break  # Found a good one, stop searching
                         if ancient_context:
-                            break # Found a jewel in this sense, stop searching senses
+                            break  # Found a jewel in this sense, stop searching senses
                 except Exception as e:
                     logger.warning(f"LSJ JSON parse error for {lemma}: {e}")
-            
-            if not ancient_context:
-                 ancient_context = {"author": "LSJ", "greek": "No direct citation found.", "translation": ""}
 
+            if not ancient_context:
+                ancient_context = {
+                    "author": "LSJ",
+                    "greek": "No direct citation found.",
+                    "translation": "",
+                }
 
             result = {
                 "pos": row["pos"],
@@ -171,7 +194,7 @@ class DatabaseManager:
                 "shift_type": row["shift_type"],
                 "semantic_warning": row["semantic_warning"],
                 "etymology_text": etymology_text or "",
-                "ancient_context": ancient_context
+                "ancient_context": ancient_context,
             }
 
             if gender:
@@ -197,11 +220,14 @@ class DatabaseManager:
             lemma_id = row[0]
 
             # 2. Query relations table
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT relation_type, parent_lemma_text
                 FROM relations
                 WHERE child_lemma_id = ?
-            """, (lemma_id,))
+            """,
+                (lemma_id,),
+            )
 
             rows = cursor.fetchall()
 
