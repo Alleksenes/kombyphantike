@@ -18,8 +18,9 @@ logging.basicConfig(
 def propagate_metadata(db_path=DB_PATH):
     """
     Backfills child forms with metadata from their parent lemmas.
-    Fields propagated: greek_def, english_def, etymology_json, lsj_id, shift_type.
-    Condition: Child field is NULL/Empty AND Parent field is NOT NULL/NotEmpty.
+    Fields propagated: greek_def, modern_def, english_def, etymology_json, lsj_id, shift_type.
+    Condition: Child definition is NULL/Empty OR is a morphological description (e.g., contains ' του ', ' της ').
+    Uses SQLite UPDATE ... FROM syntax for efficiency.
     """
     if not db_path.exists():
         logging.error(f"Database not found at {db_path}")
@@ -39,76 +40,41 @@ def propagate_metadata(db_path=DB_PATH):
 
     logging.info(f"Propagating metadata in {db_path}...")
 
-    # We select all potential candidates.
-    # Logic: Join Child -> Relations -> Parent
+    # The SQL Update Logic using UPDATE ... FROM syntax
+    # We join lemmas (as child) with relations and lemmas (as parent)
+    # We filter for 'form_of' relations and check if greek_def is empty or morphological description
+    # We propagate all relevant metadata fields to avoid regression
     query = """
-    SELECT
-        child.id,
-        child.greek_def, child.english_def, child.etymology_json, child.lsj_id, child.shift_type,
-        parent.greek_def, parent.english_def, parent.etymology_json, parent.lsj_id, parent.shift_type
-    FROM lemmas AS child
-    JOIN relations AS rel ON child.id = rel.child_lemma_id
-    JOIN lemmas AS parent ON rel.parent_lemma_text = parent.lemma_text
-    WHERE rel.relation_type = 'form_of'
+    UPDATE lemmas
+    SET
+        greek_def = parent.greek_def,
+        modern_def = parent.modern_def,
+        english_def = parent.english_def,
+        etymology_json = parent.etymology_json,
+        lsj_id = parent.lsj_id,
+        shift_type = parent.shift_type
+    FROM relations AS r
+    JOIN lemmas AS parent ON r.parent_lemma_text = parent.lemma_text
+    WHERE lemmas.id = r.child_lemma_id
+      AND r.relation_type = 'form_of'
+      AND (
+           lemmas.greek_def IS NULL
+        OR lemmas.greek_def = ''
+        OR lemmas.greek_def LIKE '% του %'
+        OR lemmas.greek_def LIKE '% της %'
+      );
     """
 
     try:
         cursor.execute(query)
-        rows = cursor.fetchall()
+        # rowcount in SQLite for UPDATE returns the number of modified rows
+        updates_count = cursor.rowcount
+        conn.commit()
+        logging.info(f"Propagation complete. Updated {updates_count} child lemmas.")
     except sqlite3.OperationalError as e:
         logging.error(f"Query failed: {e}")
+    finally:
         conn.close()
-        return
-
-    updates_count = 0
-
-    for row in rows:
-        (
-            c_id,
-            c_greek,
-            c_eng,
-            c_etym,
-            c_lsj,
-            c_shift,
-            p_greek,
-            p_eng,
-            p_etym,
-            p_lsj,
-            p_shift,
-        ) = row
-
-        # Calculate new values
-        # Only update if child is missing (None or empty string) AND parent has value
-
-        new_greek = p_greek if (not c_greek) and p_greek else c_greek
-        new_eng = p_eng if (not c_eng) and p_eng else c_eng
-        new_etym = p_etym if (not c_etym) and p_etym else c_etym
-        # For LSJ ID (Integer), 0 is theoretically possible but usually IDs start at 1.
-        # Safest is 'is None'.
-        new_lsj = p_lsj if (c_lsj is None) and (p_lsj is not None) else c_lsj
-        new_shift = p_shift if (not c_shift) and p_shift else c_shift
-
-        # Check if any change is needed
-        if (
-            new_greek != c_greek
-            or new_eng != c_eng
-            or new_etym != c_etym
-            or new_lsj != c_lsj
-            or new_shift != c_shift
-        ):
-            cursor.execute(
-                """
-                UPDATE lemmas
-                SET greek_def = ?, english_def = ?, etymology_json = ?, lsj_id = ?, shift_type = ?
-                WHERE id = ?
-            """,
-                (new_greek, new_eng, new_etym, new_lsj, new_shift, c_id),
-            )
-            updates_count += 1
-
-    conn.commit()
-    conn.close()
-    logging.info(f"Propagation complete. Updated {updates_count} child lemmas.")
 
 
 if __name__ == "__main__":
