@@ -116,7 +116,7 @@ class TestPedagogicalParams(unittest.TestCase):
 
             # Extract instruction text from center node
             center_node = next(n for n in graph.nodes if n.type == "theme")
-            text = center_node.data["instruction_text"]
+            text = center_node.data.instruction_text
 
             # Verify params in text
             self.assertIn("**TARGET LEVEL:** B1", text)

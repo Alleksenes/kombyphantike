@@ -111,8 +111,8 @@ def test_compile_curriculum_graph_structure():
         assert len(center_nodes) == 1
         center = center_nodes[0]
         assert center.label == theme
-        assert "instruction_text" in center.data
-        assert "session_data" in center.data
+        assert center.data.instruction_text is not None
+        assert center.data.session_data is not None
 
         # Check Lemma Nodes
         lemma_nodes = [n for n in graph.nodes if n.type == "lemma"]
