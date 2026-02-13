@@ -980,14 +980,15 @@ DO NOT return the Kelly statistics, frequency data, or etymology.
 
         # 2. Extract Data from Graph
         center_node = next(n for n in graph.nodes if n.type == "theme")
-        instruction_text = center_node.data["instruction_text"]
-        session_data = center_node.data["session_data"]
+        instruction_text = center_node.data.instruction_text
+        session_data = center_node.data.session_data
 
         # Extract rows from rule nodes
         worksheet_data = []
         for n in graph.nodes:
             if n.type == "rule" and n.data:
-                worksheet_data.append(n.data)
+                # Convert Pydantic model to dict for legacy processing
+                worksheet_data.append(n.data.model_dump())
 
         # 3. Save Session
         with open(SESSION_FILE, "w", encoding="utf-8") as f:
