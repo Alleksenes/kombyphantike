@@ -60,10 +60,18 @@ def run_migration(db_path: Path = DB_PATH, checkpoint_path: Path = CHECKPOINT_FI
         sys.exit(1)
 
     try:
-        translate_client = translate.Client()
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if api_key:
+            # Pass the API key via client_options.
+            # google-cloud-translate v2 (and underlying google-api-core) supports this.
+            translate_client = translate.Client(client_options={"api_key": api_key})
+            logger.info("Initialized Google Translate Client with GOOGLE_API_KEY.")
+        else:
+            translate_client = translate.Client()
+            logger.info("Initialized Google Translate Client with default credentials.")
     except Exception as e:
         logger.error(f"Failed to initialize Google Translate Client: {e}")
-        logger.error("Ensure GOOGLE_APPLICATION_CREDENTIALS is set.")
+        logger.error("Ensure GOOGLE_APPLICATION_CREDENTIALS is set or GOOGLE_API_KEY is provided.")
         return
 
     conn = sqlite3.connect(db_path)
