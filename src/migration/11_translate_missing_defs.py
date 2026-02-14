@@ -8,6 +8,10 @@ from typing import List, Tuple, Dict, Any, Optional
 from dotenv import load_dotenv
 
 # Add project root to path
+# __file__ = src/migration/11_translate_missing_defs.py
+# parent = src/migration
+# parent.parent = src
+# parent.parent.parent = project_root
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from src.config import PROCESSED_DIR, DATA_DIR
 
@@ -27,8 +31,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load Environment Variables
-load_dotenv()
+# Load Environment Variables from Project Root
+current_file = Path(__file__).resolve()
+project_root = current_file.parent.parent.parent
+env_path = project_root / ".env"
+
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+    logger.info(f"Loaded environment variables from {env_path}")
+else:
+    logger.warning(f".env file not found at {env_path}. Relying on system environment variables.")
 
 def get_checkpoint(checkpoint_path: Path) -> int:
     if checkpoint_path.exists():
@@ -54,6 +66,13 @@ def run_migration(db_path: Path = DB_PATH, checkpoint_path: Path = CHECKPOINT_FI
         logger.error(f"Database not found at {db_path}")
         return
 
+    # Check for Credentials
+    # Google Cloud Translate Client typically uses GOOGLE_APPLICATION_CREDENTIALS for authentication.
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if not credentials_path:
+        logger.warning("GOOGLE_APPLICATION_CREDENTIALS environment variable is not set. "
+                       "Google Translate Client initialization may fail unless using default credentials.")
+
     # Initialize Translate Client
     if translate is None:
         logger.error("Error: google-cloud-translate library not found. Please install it.")
@@ -63,7 +82,7 @@ def run_migration(db_path: Path = DB_PATH, checkpoint_path: Path = CHECKPOINT_FI
         translate_client = translate.Client()
     except Exception as e:
         logger.error(f"Failed to initialize Google Translate Client: {e}")
-        logger.error("Ensure GOOGLE_APPLICATION_CREDENTIALS is set.")
+        logger.error("Ensure GOOGLE_APPLICATION_CREDENTIALS is set in .env or environment.")
         return
 
     conn = sqlite3.connect(db_path)
