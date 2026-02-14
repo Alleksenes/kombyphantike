@@ -17,6 +17,9 @@ sys.modules['google.cloud'] = mock_cloud
 # Also set direct module entry just in case
 sys.modules['google.cloud.translate_v2'] = mock_translate
 
+# Mock dotenv
+sys.modules['dotenv'] = MagicMock()
+
 # Import the migration script dynamically
 import importlib.util
 script_path = Path(__file__).resolve().parent.parent / "src/migration/11_translate_missing_defs.py"
