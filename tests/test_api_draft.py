@@ -7,7 +7,15 @@ from fastapi.testclient import TestClient
 sys.modules["transliterate"] = MagicMock()
 sys.modules["spacy"] = MagicMock()
 sys.modules["sentence_transformers"] = MagicMock()
-sys.modules["google.genai"] = MagicMock()
+
+# Mock Google Properly
+mock_google = MagicMock()
+sys.modules["google"] = mock_google
+mock_genai = MagicMock()
+sys.modules["google.genai"] = mock_genai
+mock_google.genai = mock_genai
+mock_genai.types = MagicMock()
+
 sys.modules["src.database"] = MagicMock()
 sys.modules["src.audio"] = MagicMock()
 
