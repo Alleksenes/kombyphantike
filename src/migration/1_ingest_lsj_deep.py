@@ -1,9 +1,9 @@
-import sqlite3
 import json
 import re
+import sqlite3
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-import sys
 
 # Add project root to path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
@@ -13,11 +13,12 @@ from src.beta_code import BetaCodeConverter
 try:
     from tqdm import tqdm
 except ImportError:
-    tqdm = lambda x: x
+    tqdm = lambda x, **kwargs: x
 
 DB_PATH = Path("data/processed/kombyphantike_v2.db")
 XML_DIR = Path("data/dictionaries/lsj_xml")
 POET_AUTHORS = ["Sophocles", "Homer"]
+BATCH_SIZE = 1000  # Commit every 1000 entries
 
 
 def strip_ns(tag):
@@ -30,30 +31,30 @@ def clean_definition_text(text, converter):
     if not text:
         return ""
 
-    # 1. Regex Cleanup
+    # 1. Regex Cleanup (Fast)
     # Remove "c. gen.", "c. acc.", "folld. by", "cf." (case insensitive)
     text = re.sub(r"\bc\. gen\.\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bc\. acc\.\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bfolld\. by\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\bcf\.\s*", "", text, flags=re.IGNORECASE)
 
-    # Clean multiple semicolons
+    # Clean multiple semicolons/spaces
     text = re.sub(r";+", ";", text)
-
-    # 2. Beta Code Detection
-    # If text contains /, =, \, |, run through converter token-wise to avoid garbling English
-    tokens = re.split(r"(\s+)", text)
-    processed_tokens = []
-    for token in tokens:
-        if re.search(r"[\\/=\\|]", token):
-            processed_tokens.append(converter.to_greek(token))
-        else:
-            processed_tokens.append(token)
-
-    text = "".join(processed_tokens)
-
-    # Collapse multiple spaces
     text = re.sub(r"\s+", " ", text)
+
+    # 2. Beta Code Detection (Optimized)
+    # Only split and token-process if the string actually contains beta code markers
+    # This skips the expensive loop for pure English text.
+    if re.search(r"[\\/=\\|]", text):
+        tokens = re.split(r"(\s+)", text)
+        processed_tokens = []
+        for token in tokens:
+            # Only convert if it looks like beta code AND isn't just whitespace
+            if token.strip() and re.search(r"[\\/=\\|]", token):
+                processed_tokens.append(converter.to_greek(token))
+            else:
+                processed_tokens.append(token)
+        text = "".join(processed_tokens)
 
     return text.strip()
 
@@ -73,7 +74,6 @@ def process_citation(cit_node, converter):
         elif tag in ("work", "title"):
             cit_obj["work"] = text_val
         elif tag in ("quote", "q", "text"):
-            # Rename 'text' to 'greek' as requested
             cit_obj["greek"] = clean_definition_text(text_val, converter)
         elif tag in ("translation", "tr"):
             cit_obj["translation"] = text_val
@@ -110,12 +110,10 @@ def get_definition_text(elem, converter):
     for child in elem:
         tag_name = strip_ns(child.tag)
         if tag_name == "cit":
-            # Skip citation content in definition, but keep tail text
             if child.tail:
                 text_content.append(child.tail.strip())
             continue
 
-        # Recurse for other tags to get their text
         sub_text = get_definition_text(child, converter)
         if sub_text:
             text_content.append(sub_text)
@@ -140,22 +138,29 @@ def ingest_lsj():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
+    # Optimization: synchronous off makes writes faster (riskier, but fine for migration)
+    cursor.execute("PRAGMA synchronous = OFF")
+    cursor.execute("PRAGMA journal_mode = MEMORY")
+
     cursor.execute(
         """
     CREATE TABLE IF NOT EXISTS lsj_entries (
         id INTEGER PRIMARY KEY,
-        canonical_key TEXT UNIQUE, -- Stripped beta code (e.g. 'prostatew')
-        headword TEXT, -- Original Greek form
-        entry_json TEXT -- The structured tree
+        canonical_key TEXT UNIQUE,
+        headword TEXT,
+        entry_json TEXT
     );
     """
     )
     conn.commit()
 
-    files = list(XML_DIR.glob("*.xml"))
+    files = sorted(list(XML_DIR.glob("*.xml")))  # Sort to ensure alpha order
     print(f"Found {len(files)} XML files.")
 
-    for file_path in tqdm(files):
+    total_inserted = 0
+
+    # Outer loop: Files
+    for file_path in tqdm(files, desc="Processing Files", unit="file"):
         try:
             tree = ET.parse(file_path)
             root = tree.getroot()
@@ -166,11 +171,15 @@ def ingest_lsj():
                 if strip_ns(elem.tag) == "entryFree":
                     entries.append(elem)
 
-            for entry in entries:
+            if not entries:
+                continue
+
+            # Inner loop: Entries (Visual Feedback)
+            file_updates = 0
+            for entry in tqdm(entries, desc=f"  Parsing {file_path.name}", leave=False):
                 # headword
                 headword = entry.get("headword")
                 if not headword:
-                    # try <orth> child
                     for child in entry:
                         if strip_ns(child.tag) == "orth":
                             headword = child.text
@@ -183,7 +192,6 @@ def ingest_lsj():
                 if key_attr:
                     canonical_key = converter.canonicalize(key_attr)
                 elif headword:
-                    # fallback: convert headword to beta code then canonicalize
                     beta = converter.to_beta_code(headword)
                     canonical_key = converter.canonicalize(beta)
 
@@ -191,8 +199,6 @@ def ingest_lsj():
                     continue
 
                 senses_list = []
-
-                # Find all sense tags within this entry
                 sense_nodes = []
                 for child in entry.iter():
                     if strip_ns(child.tag) == "sense":
@@ -200,9 +206,7 @@ def ingest_lsj():
 
                 for sense in sense_nodes:
                     sense_id = sense.get("id") or sense.get("n")
-
                     definition = get_definition_text(sense, converter)
-
                     citations = []
                     cit_nodes = []
                     for child in sense.iter():
@@ -236,11 +240,22 @@ def ingest_lsj():
                     ),
                 )
 
+                file_updates += 1
+                total_inserted += 1
+
+                # BATCH COMMIT
+                if total_inserted % BATCH_SIZE == 0:
+                    conn.commit()
+
+            # Commit end of file
+            conn.commit()
+
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
 
     conn.commit()
     conn.close()
+    print(f"Ingestion Complete. Total entries: {total_inserted}")
 
 
 if __name__ == "__main__":
