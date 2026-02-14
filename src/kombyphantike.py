@@ -297,9 +297,9 @@ class KombyphantikeEngine:
 
         # 1. Map Level to KDS Scores
         level_map = {
-            "A1": (0, 15),
+            "A1": (0, 20),
             "B1": (25, 40),
-            "C2": (60, 100),
+            "C2": (80, 100),
             "Any": (0, 100)
         }
         min_kds, max_kds = level_map.get(target_level, (0, 100))
@@ -538,6 +538,8 @@ class KombyphantikeEngine:
         RELATIONS_LIMIT = 2
         if complexity == "complex":
             RELATIONS_LIMIT = 6
+            # TODO: implementing deeper etymological links for complex mode.
+            # Currently we just increase the limit of fetched relations.
 
         for _, row in words_df.iterrows():
             lemma = row["Lemma"]
