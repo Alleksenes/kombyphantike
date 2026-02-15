@@ -28,9 +28,10 @@ deep-translator = "^1.11.4"
 transliterate = "^1.10.2"
 tqdm = "^4.67.1"
 elevenlabs = "^1.0.0"
-fastapi = "^0.109.0"
+fastapi = "^0.129.0"
 uvicorn = "^0.27.0"
 google-genai = "^1.0.0"
+ollama = "^0.6.1"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29" # So you can use Jupyter notebooks in VS Code
